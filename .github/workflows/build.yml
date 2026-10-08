@@ -559,7 +559,7 @@ jobs:
           // ---------- SSAO (meia resolucao) + render pbr ----------
           bool gSSAO=false,gPostOK=false,gMsOK=false;float gAOs=.85f,gFps=0,gFAcc=0;int gFN=0,gHW=1,gHH=1;
           GLuint gMsFbo=0,gMsC=0,gMsD=0,gFbo=0,gCT=0,gDT=0,gAoFbo=0,gAoT=0,gAoP=0,gCoP=0;
-          GLint uAD,uATH,uANF,uAR,uCC,uCA,uCT,uCS;
+          GLint uAD,uATH,uANF,uAR,uASZ,uCC,uCA,uCT,uCS;
           float gSlX[3]={0,0,1},gSlW[3]={1,1,1};
           void setSlider(int i,float x){float v=std::clamp((x-gSlX[i])/gSlW[i],0.f,1.f);if(i==2){gAOs=v;return;}if(sel<0)return;if(i==0)objs[sel].met=v;else objs[sel].rou=v;}
           GLuint mkProg(const char*vs,const char*fs){GLuint p=glCreateProgram();glAttachShader(p,sh(GL_VERTEX_SHADER,vs));glAttachShader(p,sh(GL_FRAGMENT_SHADER,fs));glLinkProgram(p);return p;}
@@ -583,26 +583,31 @@ jobs:
            glBindFramebuffer(GL_FRAMEBUFFER,0);gPostOK=ok;
            const char*qv="#version 300 es\nlayout(location=0) in vec3 aP; out vec2 vUV; void main(){vUV=aP.xy;gl_Position=vec4(aP.xy*2.0-1.0,0.0,1.0);}";
            const char*af=R"(#version 300 es
-          precision highp float; in vec2 vUV; uniform sampler2D uD; uniform vec2 uTH; uniform vec2 uNF; uniform float uR; out vec4 o;
+          precision highp float; in vec2 vUV; uniform sampler2D uD; uniform vec2 uTH; uniform vec2 uNF; uniform vec2 uSz; uniform float uR; out vec4 o;
+          const float bay[16]=float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
           float lin(float d){float z=d*2.0-1.0;return 2.0*uNF.x*uNF.y/(uNF.y+uNF.x-z*(uNF.y-uNF.x));}
-          vec3 pos(vec2 uv){float e=lin(texture(uD,uv).r);return vec3((uv*2.0-1.0)*uTH*e,-e);}
-          void main(){float d0=texture(uD,vUV).r;if(d0>=0.99999){o=vec4(1.0);return;}
-           vec3 P=pos(vUV);vec3 N=normalize(cross(dFdx(P),dFdy(P)));if(dot(N,-P)<0.0)N=-N;
-           float rot=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(0.06711056,0.00583715))))*6.2831853;
-           vec3 T=normalize(cross(N,abs(N.y)<0.9?vec3(0.0,1.0,0.0):vec3(1.0,0.0,0.0)));vec3 B=cross(N,T);float occ=0.0;
+          vec3 vp(ivec2 p){float e=lin(texelFetch(uD,p,0).r);vec2 uv=(vec2(p)+0.5)/uSz;return vec3((uv*2.0-1.0)*uTH*e,-e);}
+          void main(){ivec2 p=ivec2(gl_FragCoord.xy*2.0);if(texelFetch(uD,p,0).r>=0.99999){o=vec4(1.0);return;}
+           vec3 P=vp(p),Pl=vp(p-ivec2(1,0)),Pr=vp(p+ivec2(1,0)),Pd=vp(p-ivec2(0,1)),Pu=vp(p+ivec2(0,1));
+           vec3 dx=abs(Pr.z-P.z)<abs(P.z-Pl.z)?Pr-P:P-Pl;vec3 dy=abs(Pu.z-P.z)<abs(P.z-Pd.z)?Pu-P:P-Pd;
+           vec3 N=normalize(cross(dx,dy));if(dot(N,-P)<0.0)N=-N;
+           int bi=int(mod(gl_FragCoord.x,4.0))+4*int(mod(gl_FragCoord.y,4.0));float rot=(bay[bi]+0.5)/16.0*6.2831853;
+           vec3 T=normalize(cross(N,abs(N.y)<0.9?vec3(0.0,1.0,0.0):vec3(1.0,0.0,0.0)));vec3 B=cross(N,T);
+           vec3 P0=P+N*0.03*uR;float occ=0.0;
            for(int i=0;i<12;i++){float t=(float(i)+0.5)/12.0;float ph=float(i)*2.39996+rot;float s=sqrt(t);
             vec3 k=vec3(cos(ph)*s,sin(ph)*s,sqrt(1.0-t));k*=mix(0.2,1.0,t*t);
-            vec3 sp=P+(T*k.x+B*k.y+N*k.z)*uR;if(sp.z>-0.01)continue;
-            vec2 uv=sp.xy/(-sp.z*uTH)*0.5+0.5;float sd=lin(texture(uD,uv).r);
-            float rc=smoothstep(0.0,1.0,uR/abs(-P.z-sd));occ+=(sd<-sp.z-0.03*uR?1.0:0.0)*rc;}
+            vec3 sp=P0+(T*k.x+B*k.y+N*k.z)*uR;if(sp.z>-0.01)continue;
+            vec2 uv=sp.xy/(-sp.z*uTH)*0.5+0.5;if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)continue;
+            float sd=lin(texelFetch(uD,min(ivec2(uv*uSz),ivec2(uSz)-1),0).r);
+            float rc=smoothstep(0.0,1.0,uR/abs(-P.z-sd));occ+=(sd<-sp.z-0.06*uR?1.0:0.0)*rc;}
            o=vec4(1.0-occ/12.0);})";
            const char*cf=R"(#version 300 es
-          precision mediump float; in vec2 vUV; uniform sampler2D uCol; uniform sampler2D uAO; uniform vec2 uTx; uniform float uStr; out vec4 o;
-          void main(){vec4 c=texture(uCol,vUV);vec2 t=uTx*1.2;
-           float a=texture(uAO,vUV).r*0.4+(texture(uAO,vUV+vec2(t.x,t.y)).r+texture(uAO,vUV+vec2(-t.x,t.y)).r+texture(uAO,vUV+vec2(t.x,-t.y)).r+texture(uAO,vUV+vec2(-t.x,-t.y)).r)*0.15;
+          precision highp float; in vec2 vUV; uniform sampler2D uCol; uniform sampler2D uAO; uniform vec2 uTx; uniform float uStr; out vec4 o;
+          void main(){vec4 c=texture(uCol,vUV);vec2 q0=floor(vUV/uTx+0.5);
+           float a=(texture(uAO,(q0+vec2(-1.0,-1.0))*uTx).r+texture(uAO,(q0+vec2(1.0,-1.0))*uTx).r+texture(uAO,(q0+vec2(-1.0,1.0))*uTx).r+texture(uAO,(q0+vec2(1.0,1.0))*uTx).r)*0.25;
            o=vec4(c.rgb*mix(1.0,a,uStr),1.0);})";
            gAoP=mkProg(qv,af);gCoP=mkProg(qv,cf);
-           uAD=glGetUniformLocation(gAoP,"uD");uATH=glGetUniformLocation(gAoP,"uTH");uANF=glGetUniformLocation(gAoP,"uNF");uAR=glGetUniformLocation(gAoP,"uR");
+           uAD=glGetUniformLocation(gAoP,"uD");uATH=glGetUniformLocation(gAoP,"uTH");uANF=glGetUniformLocation(gAoP,"uNF");uAR=glGetUniformLocation(gAoP,"uR");uASZ=glGetUniformLocation(gAoP,"uSz");
            uCC=glGetUniformLocation(gCoP,"uCol");uCA=glGetUniformLocation(gCoP,"uAO");uCT=glGetUniformLocation(gCoP,"uTx");uCS=glGetUniformLocation(gCoP,"uStr");
            glUseProgram(gProg);}
           void runPost(){
@@ -611,7 +616,7 @@ jobs:
            glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glBindVertexArray(meshes[3].vao);
            glBindFramebuffer(GL_FRAMEBUFFER,gAoFbo);glViewport(0,0,gHW,gHH);glUseProgram(gAoP);
            glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gDT);glUniform1i(uAD,0);
-           float th=tanf(FOV/2);glUniform2f(uATH,th*(float)W/H,th);glUniform2f(uANF,.1f,100.f);glUniform1f(uAR,.55f);glDrawArrays(GL_TRIANGLES,0,6);
+           float th=tanf(FOV/2);glUniform2f(uATH,th*(float)W/H,th);glUniform2f(uANF,.1f,100.f);glUniform1f(uAR,.55f);glUniform2f(uASZ,(float)W,(float)H);glDrawArrays(GL_TRIANGLES,0,6);
            glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,W,H);glUseProgram(gCoP);
            glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gCT);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gAoT);
            glUniform1i(uCC,0);glUniform1i(uCA,1);glUniform2f(uCT,1.f/gHW,1.f/gHH);glUniform1f(uCS,gAOs);glDrawArrays(GL_TRIANGLES,0,6);
@@ -637,7 +642,7 @@ jobs:
             for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
              bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
              rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-            float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v9   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+            float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v10   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
            {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
             for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
            { // painel de render (esquerda)
