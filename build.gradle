@@ -1,0 +1,17 @@
+plugins { id 'com.android.application' version '8.5.2' }
+base { archivesName = 'NomadAnimator' }
+android {
+    namespace 'com.nomad.animator'
+    compileSdk 34
+    ndkVersion '26.1.10909125'
+    defaultConfig {
+        applicationId 'com.nomad.animator'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static' } }
+    }
+    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
+}

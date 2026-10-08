@@ -1,0 +1,3 @@
+<resources>
+  <style name="NomadTheme" parent="@android:style/Theme.NoTitleBar.Fullscreen"/>
+</resources>
