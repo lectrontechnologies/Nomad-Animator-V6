@@ -140,7 +140,7 @@ jobs:
 
           // ---------- cena + animacao ----------
           struct Key{float t;T x;};
-          struct Obj{int mesh;V col;T cur;std::vector<Key> k;char nm[24]="";int parent=-1;float len=1;};
+          struct Obj{int mesh;V col;T cur;std::vector<Key> k;char nm[24]="";int parent=-1;float len=1;float met=0,rou=.5f;};
           std::vector<Obj> objs;
           int sel=-1,tool=3,W=1,H=1;      // tool: 0 mover,1 girar,2 escalar,3 camera
           bool playing=false;float tm=0;const float DUR=5;
@@ -170,12 +170,25 @@ jobs:
           // ---------- GL ----------
           const char*VS=R"(#version 300 es
           layout(location=0) in vec3 aP; layout(location=1) in vec3 aN;
-          uniform mat4 uMVP; uniform mat4 uM; out vec3 vN; out vec3 vP;
-          void main(){gl_Position=uMVP*vec4(aP,1.0); vN=mat3(uM)*aN; vP=aP;})";
+          uniform mat4 uMVP; uniform mat4 uM; out vec3 vN; out vec3 vP; out vec3 vW;
+          void main(){gl_Position=uMVP*vec4(aP,1.0); vN=mat3(uM)*aN; vP=aP; vW=(uM*vec4(aP,1.0)).xyz;})";
           const char*FS=R"(#version 300 es
-          precision highp float; in vec3 vN; in vec3 vP; uniform vec4 uC; uniform float uL; uniform vec3 uS; out vec4 o;
-          void main(){if(uL<-1.5){vec2 q=(vP.xy-.5)*uS.xy;float dd=(abs(q.x)+abs(q.y)-uS.x*.5)*.7071;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL<0.0){vec2 q=(vP.xy-.5)*uS.xy;vec2 e=abs(q)-uS.xy*.5+uS.z;float dd=length(max(e,0.0))+min(max(e.x,e.y),0.0)-uS.z;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} float d=1.0; if(uL>0.5){d=0.25+0.75*max(dot(normalize(vN),normalize(vec3(.4,.8,.5))),0.0);} o=vec4(uC.rgb*d,uC.a);})";
-          GLuint uMVP,uM,uC,uL,uS,gProg=0;float gS[3]={1,1,0};void initText();
+          precision highp float; in vec3 vN; in vec3 vP; in vec3 vW; uniform vec4 uC; uniform float uL; uniform vec3 uS; uniform vec3 uCam; uniform vec2 uMR; out vec4 o;
+          vec3 shade(vec3 L,vec3 Lc,vec3 N,vec3 V,vec3 alb,vec3 F0,float met,float rou){
+           vec3 H=normalize(L+V);float a=rou*rou,a2=a*a;float NL=max(dot(N,L),0.0),NV=max(dot(N,V),1e-3),NH=max(dot(N,H),0.0),VH=max(dot(V,H),0.0);
+           float dd=NH*NH*(a2-1.0)+1.0;float D=a2/(3.14159*dd*dd+1e-6);float k=(rou+1.0)*(rou+1.0)/8.0;
+           float G=(NL/(NL*(1.0-k)+k))*(NV/(NV*(1.0-k)+k));vec3 F=F0+(1.0-F0)*pow(1.0-VH,5.0);
+           vec3 spec=D*G*F/(4.0*NV*max(NL,1e-3));vec3 kd=(1.0-F)*(1.0-met);
+           return (kd*alb/3.14159+spec)*Lc*NL;}
+          vec3 pbr(){vec3 N=normalize(vN),V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;
+           vec3 alb=pow(uC.rgb,vec3(2.2));float met=uMR.x,rou=clamp(uMR.y,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
+           vec3 col=shade(normalize(vec3(.4,.8,.5)),vec3(3.2,3.0,2.8),N,V,alb,F0,met,rou)+shade(normalize(vec3(-.6,.3,-.4)),vec3(.6,.7,1.0),N,V,alb,F0,met,rou);
+           vec3 amb=mix(vec3(.12,.11,.10),vec3(.22,.26,.34),N.y*.5+.5);float NV=max(dot(N,V),0.0);
+           vec3 Fa=F0+(max(vec3(1.0-rou),F0)-F0)*pow(1.0-NV,5.0);
+           col+=amb*(alb*(1.0-met)+Fa*0.6);
+           col=col*(2.51*col+0.03)/(col*(2.43*col+0.59)+0.14);return pow(clamp(col,0.0,1.0),vec3(1.0/2.2));}
+          void main(){if(uL<-1.5){vec2 q=(vP.xy-.5)*uS.xy;float dd=(abs(q.x)+abs(q.y)-uS.x*.5)*.7071;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL<0.0){vec2 q=(vP.xy-.5)*uS.xy;vec2 e=abs(q)-uS.xy*.5+uS.z;float dd=length(max(e,0.0))+min(max(e.x,e.y),0.0)-uS.z;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL>0.5){o=vec4(pbr(),uC.a);return;} o=vec4(uC.rgb,uC.a);})";
+          GLuint uMVP,uM,uC,uL,uS,uCamL,uMRL,gProg=0;float gS[3]={1,1,0},gMR[2]={0,.5f};void initText();void initPost();
           struct Mesh{GLuint vao=0,vbo=0;int n=0;GLenum mode=GL_TRIANGLES;std::vector<float> cpu;float rad=1;};
           std::vector<Mesh> meshes(6); // 0 cubo,1 esfera,2 plano,3 quad2D,4 grade,5 osso
           GLuint sh(GLenum t,const char*s){GLuint h=glCreateShader(t);glShaderSource(h,1,&s,0);glCompileShader(h);GLint ok;glGetShaderiv(h,GL_COMPILE_STATUS,&ok);
@@ -216,11 +229,11 @@ jobs:
           void initGL(){
            GLuint p=gProg=glCreateProgram();glAttachShader(p,sh(GL_VERTEX_SHADER,VS));glAttachShader(p,sh(GL_FRAGMENT_SHADER,FS));
            glLinkProgram(p);glUseProgram(p);
-           uMVP=glGetUniformLocation(p,"uMVP");uM=glGetUniformLocation(p,"uM");uC=glGetUniformLocation(p,"uC");uL=glGetUniformLocation(p,"uL");uS=glGetUniformLocation(p,"uS");
-           glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);buildMeshes();for(size_t i=6;i<meshes.size();i++){std::vector<float> c=meshes[i].cpu;float r=meshes[i].rad;meshes[i]=upload(c,GL_TRIANGLES);meshes[i].rad=r;}initText();}
+           uMVP=glGetUniformLocation(p,"uMVP");uM=glGetUniformLocation(p,"uM");uC=glGetUniformLocation(p,"uC");uL=glGetUniformLocation(p,"uL");uS=glGetUniformLocation(p,"uS");uCamL=glGetUniformLocation(p,"uCam");uMRL=glGetUniformLocation(p,"uMR");
+           glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);buildMeshes();for(size_t i=6;i<meshes.size();i++){std::vector<float> c=meshes[i].cpu;float r=meshes[i].rad;meshes[i]=upload(c,GL_TRIANGLES);meshes[i].rad=r;}initText();initPost();}
           void draw(Mesh&m,const M&mvp,const M&mod,float r,float g,float b,float a,float lit){
            glUniformMatrix4fv(uMVP,1,GL_FALSE,mvp.m);glUniformMatrix4fv(uM,1,GL_FALSE,mod.m);
-           glUniform4f(uC,r,g,b,a);glUniform1f(uL,lit);glUniform3f(uS,gS[0],gS[1],gS[2]);glBindVertexArray(m.vao);glDrawArrays(m.mode,0,m.n);}
+           glUniform4f(uC,r,g,b,a);glUniform1f(uL,lit);glUniform3f(uS,gS[0],gS[1],gS[2]);glUniform2f(uMRL,gMR[0],gMR[1]);glBindVertexArray(m.vao);glDrawArrays(m.mode,0,m.n);}
 
           // ---------- UI 2D ----------
           void rect(float x,float y,float w,float h,float r,float g,float b,float a=1,float rad=0){
@@ -370,7 +383,7 @@ jobs:
           void exportMAD(){std::string path;bool fb;FILE*f=openOut("mad",path,fb);if(!f){toast("Erro ao salvar");return;}
            auto U_=[&](uint32_t v){fwrite(&v,4,1,f);};auto Fl=[&](float v){fwrite(&v,4,1,f);};
            fwrite("MAD1",1,4,f);U_(1);Fl(24);Fl(DUR);U_((uint32_t)(meshes.size()-6));for(size_t i=6;i<meshes.size();i++){U_((uint32_t)meshes[i].cpu.size());fwrite(meshes[i].cpu.data(),4,meshes[i].cpu.size(),f);}U_((uint32_t)objs.size());
-           for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
+           for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.met);Fl(o.rou);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
             const float*c=&o.cur.p.x;for(int i=0;i<9;i++)Fl(c[i]);
             U_((uint32_t)o.k.size());for(auto&k:o.k){Fl(k.t);const float*q=&k.x.p.x;for(int i=0;i<9;i++)Fl(q[i]);}}
            fclose(f);saved(path,fb);}
@@ -396,7 +409,7 @@ jobs:
             if(o.mesh<3||o.mesh>=6){int m=o.mesh;
              if(pa[m]<0){std::vector<float> P,N;auto&c=meshes[m].cpu;for(size_t j=0;j+5<c.size();j+=6){P.insert(P.end(),{c[j],c[j+1],c[j+2]});N.insert(N.end(),{c[j+3],c[j+4],c[j+5]});}
               pa[m]=acc(P,3,"VEC3",mm3(P));pn[m]=acc(N,3,"VEC3","");}
-             mats+=fm("%s{\"pbrMetallicRoughness\":{\"baseColorFactor\":[%g,%g,%g,1],\"metallicFactor\":0,\"roughnessFactor\":0.8}}",nm?",":"",o.col.x,o.col.y,o.col.z);
+             mats+=fm("%s{\"pbrMetallicRoughness\":{\"baseColorFactor\":[%g,%g,%g,1],\"metallicFactor\":%g,\"roughnessFactor\":%g}}",nm?",":"",o.col.x,o.col.y,o.col.z,o.met,o.rou);
              meshJ+=fm("%s{\"primitives\":[{\"attributes\":{\"POSITION\":%d,\"NORMAL\":%d},\"material\":%d}]}",nm?",":"",pa[m],pn[m],nm);mj=nm++;}
             float q[4];eq(o.cur.r,q);std::string ch;
             for(int j=0;j<(int)objs.size();j++)if(objs[j].parent==i)ch+=fm("%s%d",ch.empty()?"":",",j);
@@ -506,13 +519,13 @@ jobs:
            cgltf_options op;memset(&op,0,sizeof op);cgltf_data*d=nullptr;
            if(cgltf_parse_file(&op,path.c_str(),&d)!=cgltf_result_success){toast("Falha ao ler o arquivo");return;}
            if(cgltf_load_buffers(&op,d,path.c_str())!=cgltf_result_success){cgltf_free(d);toast("Falta o .bin: ele precisa estar na mesma pasta do .gltf");return;}
-           std::vector<int> mi(d->meshes_count,-1);std::vector<V> mc(d->meshes_count,V{.8f,.8f,.8f});
+           std::vector<int> mi(d->meshes_count,-1);std::vector<V> mc(d->meshes_count,V{.8f,.8f,.8f});std::vector<float> mmt(d->meshes_count,0.f),mrg(d->meshes_count,.6f);
            for(size_t m=0;m<d->meshes_count;m++){std::vector<float> v;bool gotc=false;
             for(size_t pi=0;pi<d->meshes[m].primitives_count;pi++){cgltf_primitive&pr=d->meshes[m].primitives[pi];if(pr.type!=cgltf_primitive_type_triangles)continue;
              cgltf_accessor*pos=nullptr,*nor=nullptr;
              for(size_t a=0;a<pr.attributes_count;a++){if(pr.attributes[a].type==cgltf_attribute_type_position)pos=pr.attributes[a].data;else if(pr.attributes[a].type==cgltf_attribute_type_normal)nor=pr.attributes[a].data;}
              if(!pos)continue;
-             if(!gotc&&pr.material&&pr.material->has_pbr_metallic_roughness){const float*c=pr.material->pbr_metallic_roughness.base_color_factor;mc[m]=V{c[0],c[1],c[2]};gotc=true;}
+             if(!gotc&&pr.material&&pr.material->has_pbr_metallic_roughness){const float*c=pr.material->pbr_metallic_roughness.base_color_factor;mc[m]=V{c[0],c[1],c[2]};mmt[m]=pr.material->pbr_metallic_roughness.metallic_factor;mrg[m]=pr.material->pbr_metallic_roughness.roughness_factor;gotc=true;}
              size_t cnt=pr.indices?pr.indices->count:pos->count;
              for(size_t i=0;i+2<cnt;i+=3){V P[3],N[3];
               for(int k=0;k<3;k++){size_t ix=pr.indices?cgltf_accessor_read_index(pr.indices,i+k):i+k;float f[4]={0,0,0,0};
@@ -525,7 +538,7 @@ jobs:
             mm.rad=r>0?r:1;meshes.push_back(mm);mi[m]=(int)meshes.size()-1;}
            int base=(int)objs.size();size_t nn=d->nodes_count;
            for(size_t i=0;i<nn;i++){cgltf_node*nd=&d->nodes[i];Obj o;int mid=nd->mesh?(int)(nd->mesh-d->meshes):-1;
-            o.mesh=(mid>=0&&mi[mid]>=0)?mi[mid]:5;o.col=(o.mesh==5)?V{.85f,.85f,.65f}:mc[mid];
+            o.mesh=(mid>=0&&mi[mid]>=0)?mi[mid]:5;o.col=(o.mesh==5)?V{.85f,.85f,.65f}:mc[mid];if(o.mesh!=5){o.met=mmt[mid];o.rou=mrg[mid];}
             snprintf(o.nm,24,"%s",nd->name?nd->name:"Node");o.parent=nd->parent?base+(int)(nd->parent-d->nodes):-1;T&t=o.cur;
             if(nd->has_matrix){float m[16];cgltf_node_transform_local(nd,m);t.p=V{m[12],m[13],m[14]};
              float sx=sqrtf(m[0]*m[0]+m[1]*m[1]+m[2]*m[2]),sy=sqrtf(m[4]*m[4]+m[5]*m[5]+m[6]*m[6]),sz=sqrtf(m[8]*m[8]+m[9]*m[9]+m[10]*m[10]);
@@ -543,15 +556,77 @@ jobs:
             if(R>1e-4f){float f=(R>6||R<1.5f)?3.f/R:1.f;if(f!=1.f)for(size_t i=0;i<nn;i++){Obj&o=objs[base+i];if(o.parent<0){o.cur.s=o.cur.s*f;o.cur.p=o.cur.p*f;}}}
             sel=base;}
            cgltf_free(d);toast(fm("Importado: %d objetos",(int)nn));}
+          // ---------- SSAO (meia resolucao) + render pbr ----------
+          bool gSSAO=false,gPostOK=false,gMsOK=false;float gAOs=.85f,gFps=0,gFAcc=0;int gFN=0,gHW=1,gHH=1;
+          GLuint gMsFbo=0,gMsC=0,gMsD=0,gFbo=0,gCT=0,gDT=0,gAoFbo=0,gAoT=0,gAoP=0,gCoP=0;
+          GLint uAD,uATH,uANF,uAR,uCC,uCA,uCT,uCS;
+          float gSlX[3]={0,0,1},gSlW[3]={1,1,1};
+          void setSlider(int i,float x){float v=std::clamp((x-gSlX[i])/gSlW[i],0.f,1.f);if(i==2){gAOs=v;return;}if(sel<0)return;if(i==0)objs[sel].met=v;else objs[sel].rou=v;}
+          GLuint mkProg(const char*vs,const char*fs){GLuint p=glCreateProgram();glAttachShader(p,sh(GL_VERTEX_SHADER,vs));glAttachShader(p,sh(GL_FRAGMENT_SHADER,fs));glLinkProgram(p);return p;}
+          void initPost(){
+           gHW=std::max(W/2,1);gHH=std::max(H/2,1);
+           auto tex=[&](GLuint&t,GLint ifmt,int w,int h,GLenum fmt,GLenum ty,GLint filt){glGenTextures(1,&t);glBindTexture(GL_TEXTURE_2D,t);glTexImage2D(GL_TEXTURE_2D,0,ifmt,w,h,0,fmt,ty,nullptr);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,filt);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,filt);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);};
+           tex(gCT,GL_RGBA8,W,H,GL_RGBA,GL_UNSIGNED_BYTE,GL_LINEAR);tex(gDT,GL_DEPTH_COMPONENT24,W,H,GL_DEPTH_COMPONENT,GL_UNSIGNED_INT,GL_NEAREST);tex(gAoT,GL_R8,gHW,gHH,GL_RED,GL_UNSIGNED_BYTE,GL_LINEAR);
+           glGenFramebuffers(1,&gFbo);glBindFramebuffer(GL_FRAMEBUFFER,gFbo);
+           glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gCT,0);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,gDT,0);
+           bool ok=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;
+           glGenFramebuffers(1,&gAoFbo);glBindFramebuffer(GL_FRAMEBUFFER,gAoFbo);glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,gAoT,0);
+           ok=ok&&glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;
+           GLint ms=0;glGetIntegerv(GL_MAX_SAMPLES,&ms);ms=std::min(ms,4);gMsOK=false;
+           if(ms>=2){glGenRenderbuffers(1,&gMsC);glBindRenderbuffer(GL_RENDERBUFFER,gMsC);glRenderbufferStorageMultisample(GL_RENDERBUFFER,ms,GL_RGBA8,W,H);
+            glGenRenderbuffers(1,&gMsD);glBindRenderbuffer(GL_RENDERBUFFER,gMsD);glRenderbufferStorageMultisample(GL_RENDERBUFFER,ms,GL_DEPTH_COMPONENT24,W,H);
+            glGenFramebuffers(1,&gMsFbo);glBindFramebuffer(GL_FRAMEBUFFER,gMsFbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,gMsC);glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,gMsD);
+            gMsOK=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;}
+           glBindFramebuffer(GL_FRAMEBUFFER,0);gPostOK=ok;
+           const char*qv="#version 300 es\nlayout(location=0) in vec3 aP; out vec2 vUV; void main(){vUV=aP.xy;gl_Position=vec4(aP.xy*2.0-1.0,0.0,1.0);}";
+           const char*af=R"(#version 300 es
+          precision highp float; in vec2 vUV; uniform sampler2D uD; uniform vec2 uTH; uniform vec2 uNF; uniform float uR; out vec4 o;
+          float lin(float d){float z=d*2.0-1.0;return 2.0*uNF.x*uNF.y/(uNF.y+uNF.x-z*(uNF.y-uNF.x));}
+          vec3 pos(vec2 uv){float e=lin(texture(uD,uv).r);return vec3((uv*2.0-1.0)*uTH*e,-e);}
+          void main(){float d0=texture(uD,vUV).r;if(d0>=0.99999){o=vec4(1.0);return;}
+           vec3 P=pos(vUV);vec3 N=normalize(cross(dFdx(P),dFdy(P)));if(dot(N,-P)<0.0)N=-N;
+           float rot=fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(0.06711056,0.00583715))))*6.2831853;
+           vec3 T=normalize(cross(N,abs(N.y)<0.9?vec3(0.0,1.0,0.0):vec3(1.0,0.0,0.0)));vec3 B=cross(N,T);float occ=0.0;
+           for(int i=0;i<12;i++){float t=(float(i)+0.5)/12.0;float ph=float(i)*2.39996+rot;float s=sqrt(t);
+            vec3 k=vec3(cos(ph)*s,sin(ph)*s,sqrt(1.0-t));k*=mix(0.2,1.0,t*t);
+            vec3 sp=P+(T*k.x+B*k.y+N*k.z)*uR;if(sp.z>-0.01)continue;
+            vec2 uv=sp.xy/(-sp.z*uTH)*0.5+0.5;float sd=lin(texture(uD,uv).r);
+            float rc=smoothstep(0.0,1.0,uR/abs(-P.z-sd));occ+=(sd<-sp.z-0.03*uR?1.0:0.0)*rc;}
+           o=vec4(1.0-occ/12.0);})";
+           const char*cf=R"(#version 300 es
+          precision mediump float; in vec2 vUV; uniform sampler2D uCol; uniform sampler2D uAO; uniform vec2 uTx; uniform float uStr; out vec4 o;
+          void main(){vec4 c=texture(uCol,vUV);vec2 t=uTx*1.2;
+           float a=texture(uAO,vUV).r*0.4+(texture(uAO,vUV+vec2(t.x,t.y)).r+texture(uAO,vUV+vec2(-t.x,t.y)).r+texture(uAO,vUV+vec2(t.x,-t.y)).r+texture(uAO,vUV+vec2(-t.x,-t.y)).r)*0.15;
+           o=vec4(c.rgb*mix(1.0,a,uStr),1.0);})";
+           gAoP=mkProg(qv,af);gCoP=mkProg(qv,cf);
+           uAD=glGetUniformLocation(gAoP,"uD");uATH=glGetUniformLocation(gAoP,"uTH");uANF=glGetUniformLocation(gAoP,"uNF");uAR=glGetUniformLocation(gAoP,"uR");
+           uCC=glGetUniformLocation(gCoP,"uCol");uCA=glGetUniformLocation(gCoP,"uAO");uCT=glGetUniformLocation(gCoP,"uTx");uCS=glGetUniformLocation(gCoP,"uStr");
+           glUseProgram(gProg);}
+          void runPost(){
+           if(gMsOK){glBindFramebuffer(GL_READ_FRAMEBUFFER,gMsFbo);glBindFramebuffer(GL_DRAW_FRAMEBUFFER,gFbo);
+            glBlitFramebuffer(0,0,W,H,0,0,W,H,GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);}
+           glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glBindVertexArray(meshes[3].vao);
+           glBindFramebuffer(GL_FRAMEBUFFER,gAoFbo);glViewport(0,0,gHW,gHH);glUseProgram(gAoP);
+           glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gDT);glUniform1i(uAD,0);
+           float th=tanf(FOV/2);glUniform2f(uATH,th*(float)W/H,th);glUniform2f(uANF,.1f,100.f);glUniform1f(uAR,.55f);glDrawArrays(GL_TRIANGLES,0,6);
+           glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,W,H);glUseProgram(gCoP);
+           glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gCT);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gAoT);
+           glUniform1i(uCC,0);glUniform1i(uCA,1);glUniform2f(uCT,1.f/gHW,1.f/gHH);glUniform1f(uCS,gAOs);glDrawArrays(GL_TRIANGLES,0,6);
+           glActiveTexture(GL_TEXTURE0);glEnable(GL_BLEND);glUseProgram(gProg);}
           void frame(){
+           bool post=gSSAO&&gPostOK;glBindFramebuffer(GL_FRAMEBUFFER,post?(gMsOK?gMsFbo:gFbo):0);
            glViewport(0,0,W,H);glClearColor(.24f,.24f,.26f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
            glEnable(GL_DEPTH_TEST);
-           gVP=mul(persp(FOV,(float)W/H,.1f,100),lookAt(camEye(),tgt,{0,1,0}));
+           gVP=mul(persp(FOV,(float)W/H,.1f,100),lookAt(camEye(),tgt,{0,1,0}));{V e_=camEye();glUniform3f(uCamL,e_.x,e_.y,e_.z);}
            draw(meshes[4],gVP,id(),.34f,.34f,.37f,1,0);
            auto ln=[&](V c,V sc,float r,float g,float b){T t;t.p=c;t.s=sc;M m=model(t);draw(meshes[0],mul(gVP,m),m,r,g,b,1,0);};
            ln({0,0,0},{20,.014f,.014f},.85f,.28f,.3f);ln({0,0,0},{.014f,.014f,20},.3f,.5f,.9f);
-           for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];M mod=worldM(i);if(o.mesh==5){float wd=o.len*.45f;for(int k=0;k<4;k++){mod.m[k]*=wd;mod.m[4+k]*=o.len;mod.m[8+k]*=wd;}}float h=(i==sel)?.35f:0;
+           for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];M mod=worldM(i);if(o.mesh==5){float wd=o.len*.45f;for(int k=0;k<4;k++){mod.m[k]*=wd;mod.m[4+k]*=o.len;mod.m[8+k]*=wd;}}float h=(i==sel)?.35f:0;gMR[0]=o.met;gMR[1]=o.rou;
             draw(meshes[o.mesh],mul(gVP,mod),mod,o.col.x+(1-o.col.x)*h,o.col.y+(1-o.col.y)*h,o.col.z+(1-o.col.z)*h,1,1);}
+           gMR[0]=0;gMR[1]=.5f;if(post)runPost();
            glDisable(GL_DEPTH_TEST);
            if(sel>=0&&tool<3)drawGizmo();
            gBtn.clear();gBlock.clear();float u=U(),ML_=ML(),hH=7.2f*u;
@@ -562,9 +637,18 @@ jobs:
             for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
              bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
              rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-            float tp=.4f*u;text("Nomad Animator v8",x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+            float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v9   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
            {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
             for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
+           { // painel de render (esquerda)
+            float px=ML_,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u;panel(px,py,pw2,rh*4+2.4f*u,1*u);
+            auto sld=[&](int i,float yy,const char*lab,float v){float lw=9.5f*u,sx=px+lw,sw=pw2-lw-1.4f*u;text(lab,px+1.2f*u,yy+rh/2-2.5f*tp2,tp2,.85f,.85f,.88f);
+             rect(sx,yy+rh/2-.45f*u,sw,.9f*u,.1f,.1f,.11f,1,.45f*u);rect(sx,yy+rh/2-.45f*u,sw*v,.9f*u,.28f,.45f,.7f,1,.45f*u);
+             rect(sx+sw*v-.7f*u,yy+rh/2-1.1f*u,1.4f*u,2.2f*u,.95f,.95f,.95f,1,.7f*u);gBtn.push_back({{sx-.8f*u,yy,sw+1.6f*u,rh},300+i});gSlX[i]=sx;gSlW[i]=sw;};
+            float y1=py+1.2f*u;
+            sld(0,y1,"Metal",sel>=0?objs[sel].met:0.f);sld(1,y1+rh,"Rough",sel>=0?objs[sel].rou:.5f);sld(2,y1+2*rh,"AO",gAOs);
+            pill(px+1.2f*u,y1+3*rh+.3f*u,pw2-2.4f*u,rh-.6f*u,16,(gSSAO&&gPostOK)?"SSAO: on":"SSAO: off",gSSAO,.3f,.3f,.33f);
+            gBtn.push_back({{px,py,pw2,rh*4+2.4f*u},299});}
            // outliner + transform (direita)
            float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
            int n=(int)objs.size(),rows=std::min(n,3),st=(n>3&&sel>=0)?std::clamp(sel-2,0,n-3):0;
@@ -631,6 +715,7 @@ jobs:
            else if(i==12){if(sel>=0)clearParent(sel);}
            else if(i==13||i==14){if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
            else if(i==15){if(!filesGranted())needFiles();else{scanFiles();gImportOpen=true;}}
+           else if(i==16)gSSAO=!gSSAO;
            else if(i>=20&&i<=23){if(i==20)tm=0;else if(i==21)tm=std::max(0.f,tm-1/24.f);else if(i==22)tm=std::min(DUR,tm+1/24.f);else tm=DUR;applyAnim();}}
           void scrub(float x){tm=roundf(std::clamp((x-gTX0)/gTW,0.f,1.f)*DUR*24)/24;applyAnim();}
           void pick(float x,float y){
@@ -663,7 +748,7 @@ jobs:
            float x=AMotionEvent_getX(e,0),y=AMotionEvent_getY(e,0);
            if(act==AMOTION_EVENT_ACTION_DOWN){
             moved=false;rl=true;sx=x;sy=y;pinch=0;gDrag=false;mode=-1;
-            for(auto&b:gBtn)if(inR(b.r,x,y)){if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
+            for(auto&b:gBtn)if(inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
             if(mode<0&&gImportOpen){gImportOpen=false;mode=2;}
             if(mode<0){
              if(inR(gTrack,x,y)){mode=3;scrub(x);}
@@ -674,6 +759,7 @@ jobs:
            else if(act==AMOTION_EVENT_ACTION_POINTER_UP){rl=true;pinch=0;}
            else if(act==AMOTION_EVENT_ACTION_MOVE){
             if(mode==3)scrub(x);
+            else if(mode>=6)setSlider(mode-6,x);
             else if(mode==1&&n>=2){float d=hypotf(AMotionEvent_getX(e,1)-x,AMotionEvent_getY(e,1)-y);
              if(pinch>0&&d>1)cd=std::clamp(cd*pinch/d,2.f,40.f);pinch=d;moved=true;}
             else if(mode==1||mode==4||mode==5){
@@ -697,7 +783,7 @@ jobs:
             while(ALooper_pollOnce(ready?0:-1,nullptr,&ev,(void**)&src)>=0){
              if(src)src->process(app,src);
              if(app->destroyRequested){termEGL();return;}}
-            if(ready){double t=now();float dt=(float)(t-last);last=t;gToastT-=dt;for(float&fl:gFlash)if(fl>0)fl-=dt;
+            if(ready){double t=now();float dt=(float)(t-last);last=t;gToastT-=dt;gFAcc+=dt;gFN++;if(gFAcc>=.5f){gFps=gFN/gFAcc;gFAcc=0;gFN=0;}for(float&fl:gFlash)if(fl>0)fl-=dt;
              if(playing){tm+=dt;if(tm>DUR)tm=0;applyAnim();}
              frame();}else last=now();}}
           PMEOF
