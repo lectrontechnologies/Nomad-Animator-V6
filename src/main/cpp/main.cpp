@@ -341,6 +341,34 @@ void icon2(int id,float cx,float cy,float s,bool on){
  else if(id==8){if(playing){rect(cx-s*.7f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);rect(cx+s*.15f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);}
   else for(int i=0;i<8;i++){float h=2*s*(1-i/8.f);rect(cx-s*.7f+i*s*.2f,cy-h/2,s*.22f,h,c,c,c);}}
  else if(id==9){rect(cx-s*.8f,cy-s,s*1.6f,s*.25f,c,c,c);rect(cx-s*.3f,cy-s*1.2f,s*.6f,s*.25f,c,c,c);rect(cx-s*.65f,cy-s*.65f,s*1.3f,s*1.7f,c,c,c,1,s*.15f);}}
+// ---------- permissao "Acesso a todos os arquivos" (via JNI) ----------
+android_app*gApp=nullptr;
+bool filesGranted(){
+ if(!gApp||!gApp->activity)return true;JavaVM*vm=gApp->activity->vm;JNIEnv*env=nullptr;
+ if(vm->AttachCurrentThread(&env,nullptr)!=JNI_OK||!env)return true;
+ bool ok=true;jclass ec=env->FindClass("android/os/Environment");
+ if(ec){jmethodID m=env->GetStaticMethodID(ec,"isExternalStorageManager","()Z");
+  if(m)ok=env->CallStaticBooleanMethod(ec,m)!=JNI_FALSE;}
+ if(env->ExceptionCheck())env->ExceptionClear();
+ vm->DetachCurrentThread();return ok;}
+void openFilesSettings(){
+ if(!gApp||!gApp->activity)return;JavaVM*vm=gApp->activity->vm;JNIEnv*env=nullptr;
+ if(vm->AttachCurrentThread(&env,nullptr)!=JNI_OK||!env)return;
+ jobject act=gApp->activity->clazz;
+ auto go=[&](const char*action,bool withPkg)->bool{
+  jclass ic=env->FindClass("android/content/Intent");if(!ic){env->ExceptionClear();return false;}
+  jmethodID ct=env->GetMethodID(ic,"<init>","(Ljava/lang/String;)V");
+  jobject it=env->NewObject(ic,ct,env->NewStringUTF(action));
+  if(withPkg){jclass uc=env->FindClass("android/net/Uri");
+   jmethodID pr=env->GetStaticMethodID(uc,"parse","(Ljava/lang/String;)Landroid/net/Uri;");
+   jobject uri=env->CallStaticObjectMethod(uc,pr,env->NewStringUTF("package:com.nomad.animator"));
+   jmethodID sd=env->GetMethodID(ic,"setData","(Landroid/net/Uri;)Landroid/content/Intent;");env->CallObjectMethod(it,sd,uri);}
+  jclass ac=env->GetObjectClass(act);jmethodID sa=env->GetMethodID(ac,"startActivity","(Landroid/content/Intent;)V");
+  env->CallVoidMethod(act,sa,it);
+  if(env->ExceptionCheck()){env->ExceptionClear();return false;}return true;};
+ if(!go("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",true))go("android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION",false);
+ vm->DetachCurrentThread();}
+void needFiles(){toast("Ative Permitir gerenciar todos os arquivos e volte ao app");openFilesSettings();}
 void importGLTF(const std::string&path);
 // ZIPBEGIN
 static uint32_t rd32(const unsigned char*q){return q[0]|(q[1]<<8)|(q[2]<<16)|((uint32_t)q[3]<<24);}
@@ -445,7 +473,7 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;text("Nomad Animator v7",x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+  float tp=.4f*u;text("Nomad Animator v8",x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
  {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
   for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
  // outliner + transform (direita)
@@ -459,7 +487,7 @@ void frame(){
   rect(rx+1.6f*u,yy+1.3f*u,1.8f*u,1.8f*u,objs[i].col.x,objs[i].col.y,objs[i].col.z,1,.9f*u);
   text(objs[i].nm,rx+4.6f*u,yy+2.2f*u-2.5f*tpx,tpx,.93f,.93f,.93f);gBtn.push_back({{rx,yy,pw,rh},100+i});}
  if(sel>=0){T&t=objs[sel].cur;float ty=ry+oh+1.5f*u;panel(rx,ty,pw,4*u+3*rh+1*u,1*u);
-  text("Transform",rx+1.5f*u,ty+2*u-2.5f*tpx,tpx,.6f,.6f,.65f);
+  
   float lw=5.5f*u,fw=(pw-lw-1.2f*u)/3;static const char*XYZ[3]={"X","Y","Z"};
   for(int j=0;j<3;j++)tcen(XYZ[j],rx+lw+j*fw+fw/2,ty+2*u,tpx,AC[j][0],AC[j][1],AC[j][2]);
   static const char*LB3[3]={"Loc","Rot","Scl"};V val[3]={t.p,t.r*(180/PI),t.s};
@@ -512,8 +540,8 @@ void press(int i){
  else if(i==10)addObj(5);
  else if(i==11){if(sel<0)toast("Selecione um objeto");else{parentMode=true;toast("Toque no objeto PAI");}}
  else if(i==12){if(sel>=0)clearParent(sel);}
- else if(i==13)exportMAD();else if(i==14)exportGLTF();
- else if(i==15){scanFiles();gImportOpen=true;}
+ else if(i==13||i==14){if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
+ else if(i==15){if(!filesGranted())needFiles();else{scanFiles();gImportOpen=true;}}
  else if(i>=20&&i<=23){if(i==20)tm=0;else if(i==21)tm=std::max(0.f,tm-1/24.f);else if(i==22)tm=std::min(DUR,tm+1/24.f);else tm=DUR;applyAnim();}}
 void scrub(float x){tm=roundf(std::clamp((x-gTX0)/gTW,0.f,1.f)*DUR*24)/24;applyAnim();}
 void pick(float x,float y){
@@ -572,7 +600,7 @@ void onCmd(android_app*a,int32_t c){
 
 void android_main(android_app*app){
  app->onAppCmd=onCmd;app->onInputEvent=onInput;
- if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
+ gApp=app;if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
  auto now=[](){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;};
  double last=now();
  while(true){
