@@ -18,6 +18,7 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 #include <sys/stat.h>
+#include <zlib.h>
 #include <cctype>
 #define PI 3.14159265f
 
@@ -340,17 +341,54 @@ void icon2(int id,float cx,float cy,float s,bool on){
  else if(id==8){if(playing){rect(cx-s*.7f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);rect(cx+s*.15f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);}
   else for(int i=0;i<8;i++){float h=2*s*(1-i/8.f);rect(cx-s*.7f+i*s*.2f,cy-h/2,s*.22f,h,c,c,c);}}
  else if(id==9){rect(cx-s*.8f,cy-s,s*1.6f,s*.25f,c,c,c);rect(cx-s*.3f,cy-s*1.2f,s*.6f,s*.25f,c,c,c);rect(cx-s*.65f,cy-s*.65f,s*1.3f,s*1.7f,c,c,c,1,s*.15f);}}
-void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;const char*dirs[2]={"/storage/emulated/0/Download",gDir};
- for(auto dp:dirs){DIR*d=opendir(dp);if(!d)continue;
-  while(dirent*e=readdir(d)){std::string n=e->d_name,l=n;for(auto&ch:l)ch=(char)tolower((unsigned char)ch);
-   if((l.size()>5&&l.compare(l.size()-5,5,".gltf")==0)||(l.size()>4&&l.compare(l.size()-4,4,".glb")==0)){
-    std::string pth=std::string(dp)+"/"+n;struct stat st;if(stat(pth.c_str(),&st)==0)v.push_back({st.st_mtime,pth});}}
-  closedir(d);}
- std::sort(v.rbegin(),v.rend());for(size_t i=0;i<v.size()&&i<6;i++)gFiles.push_back(v[i].second);}
+void importGLTF(const std::string&path);
+// ZIPBEGIN
+static uint32_t rd32(const unsigned char*q){return q[0]|(q[1]<<8)|(q[2]<<16)|((uint32_t)q[3]<<24);}
+static uint32_t rd16(const unsigned char*q){return q[0]|(q[1]<<8);}
+static void mkdirs(const std::string&path){for(size_t i=1;i<path.size();i++)if(path[i]=='/')mkdir(path.substr(0,i).c_str(),0755);}
+std::string unzipModel(const std::string&zp){
+ FILE*f=fopen(zp.c_str(),"rb");if(!f)return "";
+ fseek(f,0,SEEK_END);long sz=ftell(f);fseek(f,0,SEEK_SET);if(sz<22){fclose(f);return "";}
+ std::vector<unsigned char> z(sz);size_t rd=fread(z.data(),1,sz,f);fclose(f);if((long)rd!=sz)return "";
+ long e=-1;for(long i=sz-22;i>=0&&i>=sz-22-65535;i--)if(rd32(&z[i])==0x06054b50){e=i;break;}
+ if(e<0)return "";
+ int n=(int)rd16(&z[e+10]);uint32_t p=rd32(&z[e+16]);
+ std::string nm=zp;size_t sl=nm.rfind('/');if(sl!=std::string::npos)nm=nm.substr(sl+1);size_t dt=nm.rfind('.');if(dt!=std::string::npos)nm=nm.substr(0,dt);
+ std::string out=std::string(gDir)+"/import_"+nm;mkdir(out.c_str(),0755);std::string found;
+ for(int i=0;i<n;i++){if((long)p+46>sz||rd32(&z[p])!=0x02014b50)break;
+  int method=(int)rd16(&z[p+10]);uint32_t csz=rd32(&z[p+20]),usz=rd32(&z[p+24]);uint32_t nl=rd16(&z[p+28]),el=rd16(&z[p+30]),cl=rd16(&z[p+32]),lo=rd32(&z[p+42]);
+  if((long)(p+46+nl)>sz)break;std::string name((const char*)&z[p+46],nl);p+=46+nl+el+cl;
+  std::string l=name;for(auto&c:l)c=(char)tolower((unsigned char)c);
+  auto ends=[&](const char*x){size_t k=strlen(x);return l.size()>k&&l.compare(l.size()-k,k,x)==0;};
+  bool isg=ends(".gltf")||ends(".glb");
+  if(!(isg||ends(".bin"))||name.find("..")!=std::string::npos||name[0]=='/')continue;
+  if((long)lo+30>sz||rd32(&z[lo])!=0x04034b50)continue;
+  uint32_t ds=lo+30+rd16(&z[lo+26])+rd16(&z[lo+28]);if((long)ds+(long)csz>sz)continue;
+  std::vector<unsigned char> o(usz?usz:1);
+  if(method==0){if(csz!=usz)continue;memcpy(o.data(),&z[ds],usz);}
+  else if(method==8){z_stream zs;memset(&zs,0,sizeof zs);if(inflateInit2(&zs,-MAX_WBITS)!=Z_OK)continue;
+   zs.next_in=&z[ds];zs.avail_in=csz;zs.next_out=o.data();zs.avail_out=usz;int r=inflate(&zs,Z_FINISH);inflateEnd(&zs);if(r!=Z_STREAM_END)continue;}
+  else continue;
+  std::string fp=out+"/"+name;mkdirs(fp);FILE*w=fopen(fp.c_str(),"wb");if(!w)continue;fwrite(o.data(),1,usz,w);fclose(w);
+  if(isg&&found.empty())found=fp;}
+ return found;}
+// ZIPEND
+void importPath(const std::string&p){std::string l=p;for(auto&c:l)c=(char)tolower((unsigned char)c);
+ if(l.size()>4&&l.compare(l.size()-4,4,".zip")==0){std::string g=unzipModel(p);if(g.empty()){toast("O zip nao tem .gltf/.glb");return;}importGLTF(g);}else importGLTF(p);}
+void scanDir(const std::string&dp,int depth,std::vector<std::pair<time_t,std::string>>&v){DIR*d=opendir(dp.c_str());if(!d)return;
+ while(dirent*e=readdir(d)){std::string n=e->d_name;if(n=="."||n=="..")continue;std::string pth=dp+"/"+n;struct stat st;if(stat(pth.c_str(),&st)!=0)continue;
+  if(S_ISDIR(st.st_mode)){if(depth>0&&n.compare(0,7,"import_")!=0)scanDir(pth,depth-1,v);continue;}
+  std::string l=n;for(auto&ch:l)ch=(char)tolower((unsigned char)ch);
+  auto ends=[&](const char*x){size_t k=strlen(x);return l.size()>k&&l.compare(l.size()-k,k,x)==0;};
+  if(ends(".gltf")||ends(".glb")||ends(".zip"))v.push_back({st.st_mtime,pth});}
+ closedir(d);}
+void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;
+ scanDir("/storage/emulated/0/Download",1,v);scanDir(gDir,1,v);
+ std::sort(v.rbegin(),v.rend());for(size_t i=0;i<v.size()&&i<8;i++)gFiles.push_back(v[i].second);}
 void importGLTF(const std::string&path){
  cgltf_options op;memset(&op,0,sizeof op);cgltf_data*d=nullptr;
  if(cgltf_parse_file(&op,path.c_str(),&d)!=cgltf_result_success){toast("Falha ao ler o arquivo");return;}
- if(cgltf_load_buffers(&op,d,path.c_str())!=cgltf_result_success){cgltf_free(d);toast("Falha ao carregar dados (falta o .bin?)");return;}
+ if(cgltf_load_buffers(&op,d,path.c_str())!=cgltf_result_success){cgltf_free(d);toast("Falta o .bin: ele precisa estar na mesma pasta do .gltf");return;}
  std::vector<int> mi(d->meshes_count,-1);std::vector<V> mc(d->meshes_count,V{.8f,.8f,.8f});
  for(size_t m=0;m<d->meshes_count;m++){std::vector<float> v;bool gotc=false;
   for(size_t pi=0;pi<d->meshes[m].primitives_count;pi++){cgltf_primitive&pr=d->meshes[m].primitives[pi];if(pr.type!=cgltf_primitive_type_triangles)continue;
@@ -407,7 +445,7 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;text("Nomad Animator v6",x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+  float tp=.4f*u;text("Nomad Animator v7",x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
  {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
   for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
  // outliner + transform (direita)
@@ -453,11 +491,11 @@ void frame(){
  {float px=tx(tm);rect(px-.17f*u,ry0,.34f*u,rulH_+4*rowH,.28f,.45f,.7f);rect(px-2.4f*u,ry0,4.8f*u,rulH_*.9f,.28f,.45f,.7f,1,.8f*u);
   char b[8];snprintf(b,8,"%d",(int)roundf(tm*24));tcen(b,px,ry0+rulH_*.45f,.34f*u,1,1,1);}
  if(gImportOpen){float pw2=82*u,rh2=4.8f*u,tp2=.42f*u;int n=std::max((int)gFiles.size(),1);float ph2=6.5f*u+n*rh2+1.5f*u,px2=(W-pw2)/2,py2=(H-ph2)/2;
-  panel(px2,py2,pw2,ph2,1.2f*u);text("Importar glTF / GLB",px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
-  if(gFiles.empty()){text("Nenhum .gltf/.glb em Download.",px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
+  panel(px2,py2,pw2,ph2,1.2f*u);text("Importar glTF / GLB / ZIP",px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
+  if(gFiles.empty()){text("Nenhum .gltf/.glb/.zip em Download.",px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
    text("Ative Acesso a todos os arquivos nas permissoes do app.",px2+2*u,py2+8.1f*u+rh2-2.5f*tp2,tp2*.9f,.6f,.6f,.65f);}
   for(size_t i=0;i<gFiles.size();i++){float yy=py2+6.5f*u+i*rh2;rect(px2+1*u,yy,pw2-2*u,rh2-.4f*u,.24f,.24f,.27f,1,.7f*u);
-   std::string nf=gFiles[i];size_t sl=nf.rfind('/');if(sl!=std::string::npos)nf=nf.substr(sl+1);if(nf.size()>38)nf=nf.substr(0,38);
+   std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>38)nf=nf.substr(nf.size()-38);
    text(nf.c_str(),px2+2.5f*u,yy+rh2/2-.2f*u-2.5f*tp2,tp2,.95f,.95f,.95f);gBtn.push_back({{px2+1*u,yy,pw2-2*u,rh2},200+(int)i});}
   gBtn.push_back({{px2,py2,pw2,ph2},299});}
  if(gToastT>0){float tt=.4f*u,w2=tw(gToast.c_str(),tt)+4*u,bx=(W-w2)/2,by=tT-7*u;rect(bx,by,w2,5.4f*u,.08f,.08f,.08f,.93f,1*u);text(gToast.c_str(),bx+2*u,by+2.7f*u-2.5f*tt,tt,1,1,1);}
@@ -467,7 +505,7 @@ void frame(){
 // ---------- input ----------
 void press(int i){
  if(i>=0&&i<32)gFlash[i]=.35f;
- if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())importGLTF(gFiles[k]);}return;}
+ if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())importPath(gFiles[k]);}return;}
  if(i<3)addObj(i);else if(i<7)tool=i-3;
  else if(i==7)insertKey();else if(i==8)playing=!playing;
  else if(i==9){if(sel>=0)delObj(sel);}
