@@ -316,7 +316,7 @@ void drawNav(){ND d[6];navPts(d);float R=navR(),cx=navX(),cy=navY();
   rect(e.x-r,e.y-r,2*r,2*r,c[0]*k,c[1]*k,c[2]*k,1,r);
   if(e.pos){float ps=H*.0055f;text(LB[e.a],e.x-tw(LB[e.a],ps)/2,e.y-2.5f*ps,ps,1,1,1);}}}
 // ---------- exportacao (MAD / glTF) + rigging ----------
-bool parentMode=false;std::string gToast;float gToastT=0;const char*gDir=".";std::string gProj="projeto";
+bool parentMode=false;std::string gToast;float gToastT=0;const char*gDir=".";
 void toast(const std::string&t){gToast=t;gToastT=4;}
 std::string fm(const char*f,...){char b[1024];va_list a;va_start(a,f);vsnprintf(b,1024,f,a);va_end(a);return b;}
 void insertKey(){if(sel<0)return;Obj&o=objs[sel];bool f=false;for(auto&k:o.k)if(fabsf(k.t-tm)<.02f){k.x=o.cur;f=true;}
@@ -328,21 +328,13 @@ FILE*openOut(const char*ext,std::string&path,bool&fb){long t=(long)time(nullptr)
  path=fm("/storage/emulated/0/Download/nomad_%ld.%s",t,ext);FILE*f=fopen(path.c_str(),"wb");
  if(!f){path=fm("%s/nomad_%ld.%s",gDir,t,ext);f=fopen(path.c_str(),"wb");fb=true;}return f;}
 void saved(const std::string&path,bool fb){toast("Salvo: "+path+(fb?"  (ative Acesso a todos os arquivos para salvar em Downloads)":""));}
-void writeMAD(FILE*f){
+void exportMAD(){std::string path;bool fb;FILE*f=openOut("mad",path,fb);if(!f){toast("Erro ao salvar");return;}
  auto U_=[&](uint32_t v){fwrite(&v,4,1,f);};auto Fl=[&](float v){fwrite(&v,4,1,f);};
- fwrite("MAD2",1,4,f);U_(2);Fl(24);Fl(DUR);U_((uint32_t)(meshes.size()-6));
- for(size_t i=6;i<meshes.size();i++){Mesh&m=meshes[i];U_((uint32_t)m.cpu.size());fwrite(m.cpu.data(),4,m.cpu.size(),f);Fl(m.rad);U_((uint32_t)m.skin.size());if(!m.skin.empty())fwrite(m.skin.data(),4,m.skin.size(),f);}
- U_((uint32_t)skins.size());
- for(auto&sk:skins){U_((uint32_t)sk.j.size());for(size_t k=0;k<sk.j.size();k++){U_((uint32_t)sk.j[k]);fwrite(sk.ibm[k].m,4,16,f);const M fz=k<sk.fz.size()?sk.fz[k]:id();fwrite(fz.m,4,16,f);}}
- U_((uint32_t)objs.size());
- for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);U_((uint32_t)o.skin);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.met);Fl(o.rou);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
-  const float*c=&o.cur.p.x;for(int i=0;i<9;i++)Fl(c[i]);U_((uint32_t)o.k.size());for(auto&k:o.k){Fl(k.t);const float*q=&k.x.p.x;for(int i=0;i<9;i++)Fl(q[i]);}}
- Fl(yaw);Fl(pitch);Fl(cd);Fl(tgt.x);Fl(tgt.y);Fl(tgt.z);Fl(tm);}
-FILE*openOutName(const std::string&nm,const char*ext,std::string&path,bool&fb){fb=false;
- path=fm("/storage/emulated/0/Download/%s.%s",nm.c_str(),ext);FILE*f=fopen(path.c_str(),"wb");
- if(!f){path=fm("%s/%s.%s",gDir,nm.c_str(),ext);f=fopen(path.c_str(),"wb");fb=true;}return f;}
-void exportMAD(){std::string path;bool fb;FILE*f=openOut("mad",path,fb);if(!f){toast("Erro ao salvar");return;}writeMAD(f);fclose(f);saved(path,fb);}
-void saveProject(){std::string path;bool fb;FILE*f=openOutName(gProj,"mad",path,fb);if(!f){toast("Erro ao salvar");return;}writeMAD(f);fclose(f);saved(path,fb);}
+ fwrite("MAD1",1,4,f);U_(1);Fl(24);Fl(DUR);U_((uint32_t)(meshes.size()-6));for(size_t i=6;i<meshes.size();i++){U_((uint32_t)meshes[i].cpu.size());fwrite(meshes[i].cpu.data(),4,meshes[i].cpu.size(),f);}U_((uint32_t)objs.size());
+ for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.met);Fl(o.rou);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
+  const float*c=&o.cur.p.x;for(int i=0;i<9;i++)Fl(c[i]);
+  U_((uint32_t)o.k.size());for(auto&k:o.k){Fl(k.t);const float*q=&k.x.p.x;for(int i=0;i<9;i++)Fl(q[i]);}}
+ fclose(f);saved(path,fb);}
 std::string b64(const std::vector<unsigned char>&d){static const char*AB="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";std::string o;
  for(size_t i=0;i<d.size();i+=3){unsigned v=d[i]<<16;if(i+1<d.size())v|=d[i+1]<<8;if(i+2<d.size())v|=d[i+2];
   o+=AB[v>>18&63];o+=AB[v>>12&63];o+=i+1<d.size()?AB[v>>6&63]:'=';o+=i+2<d.size()?AB[v&63]:'=';}return o;}
@@ -395,7 +387,7 @@ void exportGLTF(){
  js+="\"accessors\":["+accs+"],\"bufferViews\":["+views+"],\"buffers\":[{\"byteLength\":"+std::to_string(bin.size())+",\"uri\":\"data:application/octet-stream;base64,"+b64(bin)+"\"}]}";
  fwrite(js.data(),1,js.size(),f);fclose(f);saved(path,fb);}
 // ---------- icones, importacao glTF ----------
-float gFlash[64]={};bool gImportOpen=false;int gPick=0;std::vector<std::string> gFiles;
+float gFlash[32]={};bool gImportOpen=false;std::vector<std::string> gFiles;
 void icon2(int id,float cx,float cy,float s,bool on){
  if(id>=3&&id<=6){icon(id,cx,cy,s,on);return;}
  const float c=.93f;
@@ -407,9 +399,6 @@ void icon2(int id,float cx,float cy,float s,bool on){
   if(id==12)rect(cx-s*.9f,cy-s*.12f,s*1.8f,s*.24f,1,.45f,.4f);}
  else if(id==8){if(playing){rect(cx-s*.7f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);rect(cx+s*.15f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);}
   else for(int i=0;i<8;i++){float h=2*s*(1-i/8.f);rect(cx-s*.7f+i*s*.2f,cy-h/2,s*.22f,h,c,c,c);}}
- else if(id==40){rect(cx-s*.7f,cy-s,s*1.4f,s*2.f,c,c,c,1,s*.15f);rect(cx-s*.45f,cy-s*.1f,s*.9f,s*.2f,.3f,.3f,.33f);rect(cx-s*.1f,cy-s*.45f,s*.2f,s*.9f,.3f,.3f,.33f);}
- else if(id==41){rect(cx-s,cy-s*.75f,s*.8f,s*.4f,c,c,c,1,s*.1f);rect(cx-s,cy-s*.4f,s*2.f,s*1.3f,c,c,c,1,s*.12f);}
- else if(id==42){rect(cx-s*.9f,cy-s*.9f,s*1.8f,s*1.8f,c,c,c,1,s*.15f);rect(cx-s*.55f,cy-s*.9f,s*1.1f,s*.6f,.3f,.3f,.33f,1,s*.06f);rect(cx-s*.5f,cy+s*.2f,s,s*.7f,.3f,.3f,.33f,1,s*.06f);}
  else if(id==9){rect(cx-s*.8f,cy-s,s*1.6f,s*.25f,c,c,c);rect(cx-s*.3f,cy-s*1.2f,s*.6f,s*.25f,c,c,c);rect(cx-s*.65f,cy-s*.65f,s*1.3f,s*1.7f,c,c,c,1,s*.15f);}}
 // ---------- permissao "Acesso a todos os arquivos" (via JNI) ----------
 android_app*gApp=nullptr;
@@ -478,7 +467,7 @@ void scanDir(const std::string&dp,int depth,std::vector<std::pair<time_t,std::st
   if(S_ISDIR(st.st_mode)){if(depth>0&&n.compare(0,7,"import_")!=0)scanDir(pth,depth-1,v);continue;}
   std::string l=n;for(auto&ch:l)ch=(char)tolower((unsigned char)ch);
   auto ends=[&](const char*x){size_t k=strlen(x);return l.size()>k&&l.compare(l.size()-k,k,x)==0;};
-  if(gPick==0?(ends(".gltf")||ends(".glb")||ends(".zip")):ends(".mad"))v.push_back({st.st_mtime,pth});}
+  if(ends(".gltf")||ends(".glb")||ends(".zip"))v.push_back({st.st_mtime,pth});}
  closedir(d);}
 void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;
  scanDir("/storage/emulated/0/Download",1,v);scanDir(gDir,1,v);
@@ -602,9 +591,6 @@ precision highp float;precision highp int;
 layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
 layout(rgba32f,binding=0) writeonly uniform highp image2D uOut;
 uniform highp sampler2D uPrev;
-layout(rgba16f,binding=1) writeonly uniform highp image2D uAovOut;
-uniform highp sampler2D uAovPrev;
-uniform int uN;
 layout(std430,binding=0) readonly buffer NB{vec4 nd[];};
 layout(std430,binding=1) readonly buffer TB{vec4 tr[];};
 uniform ivec2 uSize;uniform int uOffY,uFirst,uFrame,uBounces;
@@ -639,7 +625,7 @@ void main(){
  rs=pcg(uint(px.x)*1973u+uint(px.y)*9277u+uint(uFrame)*26699u+1u);
  vec2 uv=(vec2(px)+vec2(rnd(),rnd()))/vec2(uSize)*2.0-1.0;
  vec3 rd=normalize(uF+uR*(uv.x*uTH.x)+uU*(uv.y*uTH.y));vec3 ro=uCam;
- vec3 Lo=vec3(0.0),T=vec3(1.0);vec3 aN=vec3(0.0);float aD=1e4;
+ vec3 Lo=vec3(0.0),T=vec3(1.0);
  for(int b=0;b<uBounces;b++){
   float th;int ti;vec2 bu;
   if(!hit(ro,rd,false,th,ti,bu)){Lo+=T*sky(rd);break;}
@@ -647,7 +633,7 @@ void main(){
   vec3 N=normalize(n0*(1.0-bu.x-bu.y)+n1*bu.x+n2*bu.y);
   vec4 m1=tr[8*ti+6],m2=tr[8*ti+7];
   vec3 alb=m1.rgb;float met=m1.a,rou=clamp(m2.x,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
-  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;if(b==0){aN=N;aD=th;}vec3 P=ro+rd*th+N*0.002;
+  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;vec3 P=ro+rd*th+N*0.002;
   vec3 TT,BB;basis(uSunD,TT,BB);float cz=1.0-rnd()*(1.0-uSunCos),sz=sqrt(max(1.0-cz*cz,0.0)),ph=2.0*PI*rnd();
   vec3 sd=normalize(TT*(sz*cos(ph))+BB*(sz*sin(ph))+uSunD*cz);float NLs=dot(N,sd);
   if(NLs>0.0){float t2;int i2;vec2 b2;if(!hit(P,sd,true,t2,i2,b2))Lo+=T*brdf(sd,N,V,alb,met,rou,F0)*uSunC*NLs;}
@@ -663,28 +649,7 @@ void main(){
   if(b>=2){float q=clamp(max(T.r,max(T.g,T.b)),0.05,0.95);if(rnd()>q)break;T/=q;}
   ro=P;rd=Ld;}
  vec4 prev=uFirst==1?vec4(0.0):texelFetch(uPrev,px,0);
- imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));
- vec4 av=vec4(aN,aD);vec4 pa=uFirst==1?av:texelFetch(uAovPrev,px,0);
- imageStore(uAovOut,px,vec4(pa.rgb+(av.rgb-pa.rgb)/float(uN),pa.a+(av.a-pa.a)/float(uN)));}
-)MC";
-const char*DNCS=R"MC(#version 310 es
-precision highp float;precision highp int;
-layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
-layout(rgba16f,binding=0) writeonly uniform highp image2D uOut;
-uniform highp sampler2D uSrc;uniform highp sampler2D uAov;
-uniform ivec2 uSize;uniform int uStep,uIter0;uniform float uPhiC;
-vec3 col(ivec2 p){vec4 c=texelFetch(uSrc,p,0);return uIter0==1?(c.a>0.0?c.rgb/c.a:vec3(0.0)):c.rgb;}
-float lum(vec3 c){return dot(c,vec3(0.2126,0.7152,0.0722));}
-void main(){ivec2 p=ivec2(gl_GlobalInvocationID.xy);if(p.x>=uSize.x||p.y>=uSize.y)return;
- vec4 ap=texelFetch(uAov,p,0);vec3 cp=col(p);float lp=lum(cp);vec3 sum=vec3(0.0);float ws=0.0;
- for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){
-  ivec2 q=clamp(p+ivec2(i,j)*uStep,ivec2(0),uSize-1);float k=(i==0?2.0:1.0)*(j==0?2.0:1.0);
-  vec4 aq=texelFetch(uAov,q,0);vec3 cq=col(q);
-  float wn=pow(max(dot(ap.xyz,aq.xyz),0.0),24.0);
-  float wd=exp(-abs(ap.w-aq.w)/(0.03*ap.w+0.02*float(uStep)*ap.w+1e-3));
-  float wc=exp(-abs(lp-lum(cq))/uPhiC);
-  float w=(i==0&&j==0)?k:k*wn*wd*wc;sum+=cq*w;ws+=w;}
- imageStore(uOut,p,vec4(sum/max(ws,1e-6),1.0));}
+ imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));}
 )MC";
 const char*MCTM=R"MC(#version 300 es
 precision highp float; in vec2 vUV; uniform sampler2D uAcc; uniform ivec2 uSz; out vec4 o;
@@ -699,7 +664,6 @@ std::vector<TriD> gTD;std::vector<int> gOrd;std::vector<V> gCen;std::vector<BN> 
 bool gMcOK=false,gMcPrev=false,gMcFinal=false,gMcGround=true,gMcHaveCam=false;
 int gMcSpp=64,gMcSamples=0,gMcRow=0,gMcRows=24,gMcW=0,gMcH=0,gMcCur=0,gMcFrame=0;
 GLuint gMcTex[2]={0,0},gMcProg=0,gMcTm=0,gMcNB=0,gMcTB=0,gMcOutF=0,gMcOutT=0;
-GLuint gMcAov[2]={0,0},gMcDnT[2]={0,0},gDnProg=0;bool gMcDn=true,gMcDnOK=false,gDnDirty=false;int gMcDnRes=0;GLint dnSrc,dnAov,dnSz,dnStep,dnI0,dnPhi,mcAovPrev,mcN;
 GLint mcSz,mcOff,mcFirst,mcFr,mcBn,mcCam,mcF,mcR,mcU,mcTH,mcSD,mcSC,mcSCos,mcPrv,tmAcc,tmSz;
 double gSigS=-1,gSigC=-1,gMcLast=0;float gDt=.016f;V gCE,gCF,gCR,gCU;
 double nowSec(){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
@@ -707,7 +671,7 @@ V vmin(V a,V b){return V{std::min(a.x,b.x),std::min(a.y,b.y),std::min(a.z,b.z)};
 V vmax(V a,V b){return V{std::max(a.x,b.x),std::max(a.y,b.y),std::max(a.z,b.z)};}
 V xf(const M&m,V p){return V{m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z+m.m[12],m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z+m.m[13],m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z+m.m[14]};}
 V xn(const M&m,V p){return V{m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z,m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z,m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z};}
-void mcReset(){gMcSamples=0;gMcRow=0;gMcFrame=0;gMcDnOK=false;}
+void mcReset(){gMcSamples=0;gMcRow=0;gMcFrame=0;}
 void gatherTris(){gTD.clear();std::vector<std::vector<M>> JS(skins.size());
  for(size_t s2=0;s2<skins.size();s2++){Skin&sk=skins[s2];JS[s2].resize(sk.j.size());
   for(size_t k=0;k<sk.j.size();k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<sk.fz.size()?sk.fz[k]:id());JS[s2][k]=mul(jw,sk.ibm[k]);}}
@@ -738,7 +702,7 @@ void mcBuild(){gatherTris();int n=(int)gTD.size();gOrd.resize(n);gCen.resize(n);
   for(int k=0;k<3;k++)tr.insert(tr.end(),{t.n[k].x,t.n[k].y,t.n[k].z,0.f});tr.insert(tr.end(),{t.col.x,t.col.y,t.col.z,t.met,t.rou,0.f,0.f,0.f});}
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcNB);glBufferData(GL_SHADER_STORAGE_BUFFER,nd.size()*4,nd.data(),GL_DYNAMIC_DRAW);
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcTB);glBufferData(GL_SHADER_STORAGE_BUFFER,tr.size()*4,tr.data(),GL_DYNAMIC_DRAW);}
-void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcAov[0]=gMcAov[1]=gMcDnT[0]=gMcDnT[1]=0;gMcDnOK=false;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
+void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
  GLint ma=0,mi=0;glGetIntegerv(GL_MAJOR_VERSION,&ma);glGetIntegerv(GL_MINOR_VERSION,&mi);if(ma<3||(ma==3&&mi<1))return;
  GLuint p=glCreateProgram();glAttachShader(p,sh(GL_COMPUTE_SHADER,MCCS));glLinkProgram(p);GLint ok=0;glGetProgramiv(p,GL_LINK_STATUS,&ok);
  if(!ok){char b[512];glGetProgramInfoLog(p,512,0,b);__android_log_print(ANDROID_LOG_ERROR,"NA","MC: %s",b);return;}
@@ -746,19 +710,12 @@ void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gM
  mcBn=glGetUniformLocation(p,"uBounces");mcCam=glGetUniformLocation(p,"uCam");mcF=glGetUniformLocation(p,"uF");mcR=glGetUniformLocation(p,"uR");mcU=glGetUniformLocation(p,"uU");
  mcTH=glGetUniformLocation(p,"uTH");mcSD=glGetUniformLocation(p,"uSunD");mcSC=glGetUniformLocation(p,"uSunC");mcSCos=glGetUniformLocation(p,"uSunCos");mcPrv=glGetUniformLocation(p,"uPrev");
  const char*qv="#version 300 es\nlayout(location=0) in vec3 aP; out vec2 vUV; void main(){vUV=aP.xy;gl_Position=vec4(aP.xy*2.0-1.0,0.0,1.0);}";
- gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");mcAovPrev=glGetUniformLocation(p,"uAovPrev");mcN=glGetUniformLocation(p,"uN");
- {GLuint dp=glCreateProgram();glAttachShader(dp,sh(GL_COMPUTE_SHADER,DNCS));glLinkProgram(dp);GLint ok2=0;glGetProgramiv(dp,GL_LINK_STATUS,&ok2);
-  if(ok2){gDnProg=dp;dnSrc=glGetUniformLocation(dp,"uSrc");dnAov=glGetUniformLocation(dp,"uAov");dnSz=glGetUniformLocation(dp,"uSize");
-   dnStep=glGetUniformLocation(dp,"uStep");dnI0=glGetUniformLocation(dp,"uIter0");dnPhi=glGetUniformLocation(dp,"uPhiC");}else gDnProg=0;}
+ gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");
  glGenBuffers(1,&gMcNB);glGenBuffers(1,&gMcTB);glUseProgram(gProg);gMcOK=true;}
 void mcResize(int w,int h){
- if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(2,gMcAov);glDeleteTextures(2,gMcDnT);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
+ if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
  glGenTextures(2,gMcTex);
  for(int i=0;i<2;i++){glBindTexture(GL_TEXTURE_2D,gMcTex[i]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA32F,w,h);
-  glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
- glGenTextures(2,gMcAov);glGenTextures(2,gMcDnT);
- for(int i=0;i<4;i++){glBindTexture(GL_TEXTURE_2D,i<2?gMcAov[i]:gMcDnT[i-2]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA16F,w,h);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
  glGenTextures(1,&gMcOutT);glBindTexture(GL_TEXTURE_2D,gMcOutT);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
@@ -784,26 +741,17 @@ void mcStep(){
  glUseProgram(gMcProg);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,gMcNB);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,gMcTB);
  glBindImageTexture(0,gMcTex[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);glUniform1i(mcPrv,0);
- glBindImageTexture(1,gMcAov[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(mcAovPrev,1);glActiveTexture(GL_TEXTURE0);glUniform1i(mcN,gMcSamples+1);
  glUniform2i(mcSz,gMcW,gMcH);glUniform1i(mcOff,gMcRow);glUniform1i(mcFirst,gMcSamples==0?1:0);glUniform1i(mcFr,gMcFrame);glUniform1i(mcBn,gMcFinal?6:2);
  glUniform3f(mcCam,e.x,e.y,e.z);glUniform3f(mcF,f.x,f.y,f.z);glUniform3f(mcR,r.x,r.y,r.z);glUniform3f(mcU,u.x,u.y,u.z);
  float th=tanf(FOV/2);glUniform2f(mcTH,th*(float)gMcW/gMcH,th);
  V sd=norm(V{.4f,.8f,.5f});glUniform3f(mcSD,sd.x,sd.y,sd.z);glUniform3f(mcSC,3.2f,3.0f,2.8f);glUniform1f(mcSCos,.9995f);
  glDispatchCompute((gMcW+7)/8,(rows+7)/8,1);
  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT|GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);
- gMcRow+=rows;if(gMcRow>=gMcH){gMcCur^=1;gMcSamples++;gMcRow=0;gMcFrame++;gDnDirty=true;}
+ gMcRow+=rows;if(gMcRow>=gMcH){gMcCur^=1;gMcSamples++;gMcRow=0;gMcFrame++;}
  glUseProgram(gProg);}
-void mcDenoise(){if(!gMcDn||!gDnProg||!gMcTex[0])return;int iters=gMcFinal?4:3;glUseProgram(gDnProg);
- glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(dnAov,1);
- for(int k=0;k<iters;k++){GLuint src=k==0?gMcTex[gMcCur]:gMcDnT[(k-1)&1];
-  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,src);glUniform1i(dnSrc,0);
-  glBindImageTexture(0,gMcDnT[k&1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);
-  glUniform2i(dnSz,gMcW,gMcH);glUniform1i(dnStep,1<<k);glUniform1i(dnI0,k==0?1:0);glUniform1f(dnPhi,.15f+2.f/sqrtf((float)std::max(gMcSamples,1)));
-  glDispatchCompute((gMcW+7)/8,(gMcH+7)/8,1);glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);}
- gMcDnRes=(iters-1)&1;gMcDnOK=true;glActiveTexture(GL_TEXTURE0);glUseProgram(gProg);}
-void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,(gMcDn&&gMcDnOK)?gMcDnT[gMcDnRes]:gMcTex[gMcCur]);
+void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);
  glUniform1i(tmAcc,0);glUniform2i(tmSz,gMcW,gMcH);glBindVertexArray(meshes[3].vao);glDrawArrays(GL_TRIANGLES,0,6);glEnable(GL_BLEND);glUseProgram(gProg);}
-void mcFrame(){mcStep();if(gDnDirty){if(gMcDn&&mcShow())mcDenoise();gDnDirty=false;}if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
+void mcFrame(){mcStep();if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
 static void mcWrite(void*c,void*d,int n){fwrite(d,1,n,(FILE*)c);}
 void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  glBindFramebuffer(GL_FRAMEBUFFER,gMcOutF);glViewport(0,0,gMcW,gMcH);mcDraw();
@@ -812,47 +760,6 @@ void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  for(int y=0;y<gMcH/2;y++)for(int x=0;x<gMcW*4;x++)std::swap(px[(size_t)y*gMcW*4+x],px[(size_t)(gMcH-1-y)*gMcW*4+x]);
  std::string path;bool fb;FILE*f=openOut("png",path,fb);if(!f){toast("Erro ao salvar");return;}
  stbi_write_png_to_func(mcWrite,f,gMcW,gMcH,4,px.data(),gMcW*4);fclose(f);saved(path,fb);}
-// ---------- projeto: novo / salvar / abrir / importar .mad ----------
-struct Rd{const unsigned char*p;size_t n,i=0;bool ok=true;
- uint32_t u(){if(i+4>n){ok=false;return 0;}uint32_t v;memcpy(&v,p+i,4);i+=4;return v;}
- float f(){uint32_t v=u();float x;memcpy(&x,&v,4);return x;}int s(){return (int)u();}
- void b(void*d,size_t k){if(i+k>n){ok=false;memset(d,0,k);return;}memcpy(d,p+i,k);i+=k;}};
-void clearScene(){for(size_t i=6;i<meshes.size();i++){glDeleteBuffers(1,&meshes[i].vbo);if(meshes[i].svbo)glDeleteBuffers(1,&meshes[i].svbo);glDeleteVertexArrays(1,&meshes[i].vao);}
- meshes.resize(6);objs.clear();skins.clear();sel=-1;tm=0;playing=false;parentMode=false;gImportOpen=false;gSigS=-1;mcReset();}
-bool loadMAD(const std::string&path,bool replace){
- FILE*f=fopen(path.c_str(),"rb");if(!f){toast("Nao consegui abrir o arquivo");return false;}
- fseek(f,0,SEEK_END);long sz=ftell(f);fseek(f,0,SEEK_SET);if(sz<16){fclose(f);toast("Arquivo invalido");return false;}
- std::vector<unsigned char> buf(sz);size_t got=fread(buf.data(),1,sz,f);fclose(f);if((long)got!=sz){toast("Falha ao ler");return false;}
- Rd r{buf.data(),(size_t)sz};char mg[4];r.b(mg,4);uint32_t ver=r.u();
- if(memcmp(mg,"MAD2",4)!=0||ver!=2){toast("Formato .mad antigo ou invalido (so MAD2)");return false;}
- r.f();r.f();
- struct TM{std::vector<float> cpu,skin;float rad=1;};std::vector<TM> tms;uint32_t nm=r.u();if(nm>4096)r.ok=false;
- for(uint32_t i=0;i<nm&&r.ok;i++){TM t;uint32_t nc=r.u();if((size_t)nc*4>r.n-r.i){r.ok=false;break;}t.cpu.resize(nc);r.b(t.cpu.data(),(size_t)nc*4);t.rad=r.f();
-  uint32_t ns=r.u();if((size_t)ns*4>r.n-r.i){r.ok=false;break;}t.skin.resize(ns);r.b(t.skin.data(),(size_t)ns*4);tms.push_back(std::move(t));}
- std::vector<Skin> sks;uint32_t nsk=r.u();if(nsk>4096)r.ok=false;
- for(uint32_t i=0;i<nsk&&r.ok;i++){Skin sk;uint32_t nj=r.u();if(nj>4096||(size_t)nj*136>r.n-r.i){r.ok=false;break;}
-  for(uint32_t k=0;k<nj;k++){sk.j.push_back(r.s());M a,b;r.b(a.m,64);r.b(b.m,64);sk.ibm.push_back(a);sk.fz.push_back(b);}sks.push_back(sk);}
- std::vector<Obj> os;uint32_t no=r.u();if(no>100000)r.ok=false;
- for(uint32_t i=0;i<no&&r.ok;i++){Obj o;o.mesh=r.s();o.parent=r.s();o.skin=r.s();r.b(o.nm,24);o.nm[23]=0;o.len=r.f();o.met=r.f();o.rou=r.f();o.col.x=r.f();o.col.y=r.f();o.col.z=r.f();
-  float c[9];r.b(c,36);memcpy(&o.cur.p.x,c,36);uint32_t nk=r.u();if(nk>100000||(size_t)nk*40>r.n-r.i){r.ok=false;break;}
-  for(uint32_t k=0;k<nk;k++){Key kk;kk.t=r.f();float q[9];r.b(q,36);memcpy(&kk.x.p.x,q,36);o.k.push_back(kk);}os.push_back(o);}
- float cam[7];r.b(cam,28);
- if(!r.ok){toast("Arquivo .mad corrompido");return false;}
- if(replace)clearScene();
- int mb=(int)meshes.size(),sb2=(int)skins.size(),ob=(int)objs.size();
- for(auto&t:tms){Mesh mm=upload(t.cpu,GL_TRIANGLES);mm.rad=t.rad;if(!t.skin.empty())attachSkin(mm,t.skin);meshes.push_back(mm);}
- for(auto&sk:sks){for(auto&jj:sk.j)if(jj>=0)jj+=ob;skins.push_back(sk);}
- for(auto&o:os){if(o.mesh>=6)o.mesh=mb+(o.mesh-6);if(o.mesh<0||o.mesh>=(int)meshes.size())o.mesh=0;if(o.parent>=0)o.parent+=ob;
-  if(o.skin>=0){o.skin+=sb2;if(o.skin>=(int)skins.size())o.skin=-1;}objs.push_back(o);}
- if(replace){yaw=cam[0];pitch=cam[1];cd=cam[2];tgt=V{cam[3],cam[4],cam[5]};tm=cam[6];}
- sel=os.empty()?-1:ob;toast(fm("Carregado: %d objetos",(int)os.size()));return true;}
-double gNewT=-10;
-void newProject(){double n=nowSec();if(n-gNewT>3){gNewT=n;toast("Toque em Novo de novo para limpar o projeto");return;}
- gNewT=-10;clearScene();gProj=fm("projeto_%ld",(long)(time(nullptr)%100000));toast("Novo projeto");}
-void pickPath(const std::string&p){
- if(gPick==0){importPath(p);return;}
- if(gPick==1){if(loadMAD(p,true)){size_t sl=p.rfind('/');std::string n=sl==std::string::npos?p:p.substr(sl+1);size_t dt=n.rfind('.');if(dt!=std::string::npos)n=n.substr(0,dt);gProj=n;}}
- else loadMAD(p,false);}
 bool setJoints(int si){if(si<0||si>=(int)skins.size())return false;Skin&sk=skins[si];int n=std::min((int)sk.j.size(),64);static M J[64];
  for(int k=0;k<n;k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<(int)sk.fz.size()?sk.fz[k]:id());J[k]=mul(jw,sk.ibm[k]);}
  glUniformMatrix4fv(uJL,n,GL_FALSE,J[0].m);return true;}
@@ -882,15 +789,9 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v15  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
- {float bs=5.8f*u,gp=.45f*u,by=(hH-bs)/2,xr=W-ML_;
-  static const int PJ[3]={42,41,40};
-  for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);float x=xr-bs;
-   rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});xr=x-gp;}
-  xr-=.8f*u;
-  const char*rl[4]={"Import glTF","Import MAD","Export glTF","Export MAD"};const int rid[4]={15,43,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f;
-  for(int i=3;i>=0;i--){float w=tw(rl[i],ps)+4*u,x=xr-w;bool on=gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen&&gPick==0)||(rid[i]==43&&gImportOpen&&gPick==2);
-   pill(x,py,w,ph,rid[i],rl[i],on,i<2?.2f:.33f,i<2?.38f:.33f,i<2?.55f:.35f);xr=x-.8f*u;}}
+  float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v13   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+ {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
+  for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
  { // painel de render (esquerda)
   float px=ML_,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u;panel(px,py,pw2,rh*5+2.4f*u,1*u);
   auto sld=[&](int i,float yy,const char*lab,float v){float lw=9.5f*u,sx=px+lw,sw=pw2-lw-1.4f*u;text(lab,px+1.2f*u,yy+rh/2-2.5f*tp2,tp2,.85f,.85f,.88f);
@@ -903,17 +804,16 @@ void frame(){
   gBtn.push_back({{px,py,pw2,rh*5+2.4f*u},299});}
  { // painel Monte Carlo / path tracing
   float px=ML_,py=hH+1.5f*u+(5*4.4f+2.4f)*u+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,y1=py+1.0f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u;
-  panel(px,py,pw2,rh*7+1.6f*u,1*u);
+  panel(px,py,pw2,rh*6+1.6f*u,1*u);
   if(!gMcOK){text("MC indisponivel (precisa de ES 3.1)",px+1.2f*u,y1+rh/2-2.5f*tp2,tp2*.85f,.85f,.55f,.5f);}
   else{bool done=gMcFinal&&gMcSamples>=gMcSpp;
    pill(px+1.2f*u,y1,bw_,bh_,30,gMcPrev?"Preview MC: on":"Preview MC: off",gMcPrev,.3f,.3f,.33f);
    pill(px+1.2f*u,y1+rh,bw_,bh_,31,gMcFinal?(done?"Fechar render":"Parar render"):"Render final",gMcFinal,.5f,.34f,.12f);
    pill(px+1.2f*u,y1+2*rh,bw_,bh_,33,fm("Amostras: %d",gMcSpp).c_str(),false,.3f,.3f,.33f);
    pill(px+1.2f*u,y1+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
-   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y1+6*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
-  gBtn.push_back({{px,py,pw2,rh*7+1.6f*u},299});}
+   pill(px+1.2f*u,y1+4*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
+   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y1+5*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
+  gBtn.push_back({{px,py,pw2,rh*6+1.6f*u},299});}
  // outliner + transform (direita)
  float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
  int n=(int)objs.size(),rows=std::min(n,3),st=(n>3&&sel>=0)?std::clamp(sel-2,0,n-3):0;
@@ -957,8 +857,8 @@ void frame(){
  {float px=tx(tm);rect(px-.17f*u,ry0,.34f*u,rulH_+4*rowH,.28f,.45f,.7f);rect(px-2.4f*u,ry0,4.8f*u,rulH_*.9f,.28f,.45f,.7f,1,.8f*u);
   char b[8];snprintf(b,8,"%d",(int)roundf(tm*24));tcen(b,px,ry0+rulH_*.45f,.34f*u,1,1,1);}
  if(gImportOpen){float pw2=82*u,rh2=4.8f*u,tp2=.42f*u;int n=std::max((int)gFiles.size(),1);float ph2=6.5f*u+n*rh2+1.5f*u,px2=(W-pw2)/2,py2=(H-ph2)/2;
-  panel(px2,py2,pw2,ph2,1.2f*u);text((gPick==0?"Importar glTF / GLB / ZIP":gPick==1?"Abrir projeto (.mad)":"Importar .mad"),px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
-  if(gFiles.empty()){text((gPick==0?"Nenhum .gltf/.glb/.zip em Download.":"Nenhum .mad em Download."),px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
+  panel(px2,py2,pw2,ph2,1.2f*u);text("Importar glTF / GLB / ZIP",px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
+  if(gFiles.empty()){text("Nenhum .gltf/.glb/.zip em Download.",px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
    text("Ative Acesso a todos os arquivos nas permissoes do app.",px2+2*u,py2+8.1f*u+rh2-2.5f*tp2,tp2*.9f,.6f,.6f,.65f);}
   for(size_t i=0;i<gFiles.size();i++){float yy=py2+6.5f*u+i*rh2;rect(px2+1*u,yy,pw2-2*u,rh2-.4f*u,.24f,.24f,.27f,1,.7f*u);
    std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>38)nf=nf.substr(nf.size()-38);
@@ -970,8 +870,8 @@ void frame(){
 
 // ---------- input ----------
 void press(int i){
- if(i>=0&&i<64)gFlash[i]=.35f;
- if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())pickPath(gFiles[k]);}return;}
+ if(i>=0&&i<32)gFlash[i]=.35f;
+ if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())importPath(gFiles[k]);}return;}
  if(i<3)addObj(i);else if(i<7)tool=i-3;
  else if(i==7)insertKey();else if(i==8)playing=!playing;
  else if(i==9){if(sel>=0)delObj(sel);}
@@ -979,10 +879,7 @@ void press(int i){
  else if(i==11){if(sel<0)toast("Selecione um objeto");else{parentMode=true;toast("Toque no objeto PAI");}}
  else if(i==12){if(sel>=0)clearParent(sel);}
  else if(i==13||i==14){if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
- else if(i==15||i==41||i==43){if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gImportOpen=true;}}
- else if(i==40)newProject();
- else if(i==42){if(!filesGranted())needFiles();else saveProject();}
- else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
+ else if(i==15){if(!filesGranted())needFiles();else{scanFiles();gImportOpen=true;}}
  else if(i==16)gSSAO=!gSSAO;
  else if(i==17)gBones=!gBones;
  else if(i==30){gMcPrev=!gMcPrev;if(gMcPrev)gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();}
@@ -1053,7 +950,7 @@ void onCmd(android_app*a,int32_t c){
 
 void android_main(android_app*app){
  app->onAppCmd=onCmd;app->onInputEvent=onInput;
- gProj=fm("projeto_%ld",(long)(time(nullptr)%100000));gApp=app;if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
+ gApp=app;if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
  auto now=[](){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;};
  double last=now();
  while(true){
