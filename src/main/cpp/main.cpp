@@ -57,28 +57,55 @@ int sel=-1,tool=3,W=1,H=1;      // tool: 0 mover,1 girar,2 escalar,3 camera
 bool playing=false;float tm=0;const float DUR=5;
 float yaw=.6f,pitch=.4f,cd=8;V tgt{0,.5f,0};const float FOV=1.047f;
 V camEye(){return tgt+V{cosf(pitch)*sinf(yaw),sinf(pitch),cosf(pitch)*cosf(yaw)}*cd;}
+static void qmulE(const float*a,const float*b,float*o){o[0]=a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1];o[1]=a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0];
+ o[2]=a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3];o[3]=a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2];}
+static void e2q(V r,float*q){float a[4]={sinf(r.x/2),0,0,cosf(r.x/2)},b[4]={0,sinf(r.y/2),0,cosf(r.y/2)},c[4]={0,0,sinf(r.z/2),cosf(r.z/2)},t[4];qmulE(b,a,t);qmulE(c,t,q);}
+static V q2e(const float*q){float x=q[0],y=q[1],z=q[2],w=q[3];return V{atan2f(2*(w*x+y*z),1-2*(x*x+y*y)),asinf(std::clamp(2*(w*y-z*x),-1.f,1.f)),atan2f(2*(w*z+x*y),1-2*(y*y+z*z))};}
+static V slerpE(V a,V b,float u){float qa[4],qb[4],q[4];e2q(a,qa);e2q(b,qb);float d=qa[0]*qb[0]+qa[1]*qb[1]+qa[2]*qb[2]+qa[3]*qb[3];
+ if(d<0){for(int i=0;i<4;i++)qb[i]=-qb[i];d=-d;}float wa,wb;
+ if(d>.9995f){wa=1-u;wb=u;}else{float th=acosf(d),sn=sinf(th);wa=sinf((1-u)*th)/sn;wb=sinf(u*th)/sn;}
+ for(int i=0;i<4;i++)q[i]=qa[i]*wa+qb[i]*wb;float l=sqrtf(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);for(int i=0;i<4;i++)q[i]/=l;return q2e(q);}
 T eval(Obj&o,float t){
  auto&k=o.k;if(k.empty())return o.cur;
  if(t<=k.front().t)return k.front().x;if(t>=k.back().t)return k.back().x;
  size_t i=0;while(k[i+1].t<t)i++;
  float u=(t-k[i].t)/(k[i+1].t-k[i].t);T r;
- r.p=lerp(k[i].x.p,k[i+1].x.p,u);r.r=lerp(k[i].x.r,k[i+1].x.r,u);r.s=lerp(k[i].x.s,k[i+1].x.s,u);return r;}
+ r.p=lerp(k[i].x.p,k[i+1].x.p,u);r.r=slerpE(k[i].x.r,k[i+1].x.r,u);r.s=lerp(k[i].x.s,k[i+1].x.s,u);return r;}
 void applyAnim(){for(auto&o:objs)if(!o.k.empty())o.cur=eval(o,tm);}
-struct Skin{std::vector<int> j;std::vector<M> ibm;};std::vector<Skin> skins;
+struct Skin{std::vector<int> j;std::vector<M> ibm,fz;};std::vector<Skin> skins;
 M worldM(int i,int d=0){M l=model(objs[i].cur);int p=objs[i].parent;return(p>=0&&d<32)?mul(worldM(p,d+1),l):l;}
 V wp(int i){M m=worldM(i);return V{m.m[12],m.m[13],m.m[14]};}
 V invPt(const M&m,V p){V c0{m.m[0],m.m[1],m.m[2]},c1{m.m[4],m.m[5],m.m[6]},c2{m.m[8],m.m[9],m.m[10]},d=p-V{m.m[12],m.m[13],m.m[14]};
  float det=dot(c0,cross(c1,c2));if(fabsf(det)<1e-8f)return d;return V{dot(cross(c1,c2),d),dot(cross(c2,c0),d),dot(cross(c0,c1),d)}*(1/det);}
+M invAff(const M&m){V c0{m.m[0],m.m[1],m.m[2]},c1{m.m[4],m.m[5],m.m[6]},c2{m.m[8],m.m[9],m.m[10]};float det=dot(c0,cross(c1,c2));M r=id();if(fabsf(det)<1e-12f)return r;
+ V r0=cross(c1,c2)*(1/det),r1=cross(c2,c0)*(1/det),r2=cross(c0,c1)*(1/det);
+ r.m[0]=r0.x;r.m[4]=r0.y;r.m[8]=r0.z;r.m[1]=r1.x;r.m[5]=r1.y;r.m[9]=r1.z;r.m[2]=r2.x;r.m[6]=r2.y;r.m[10]=r2.z;
+ V t{m.m[12],m.m[13],m.m[14]};r.m[12]=-(r0.x*t.x+r0.y*t.y+r0.z*t.z);r.m[13]=-(r1.x*t.x+r1.y*t.y+r1.z*t.z);r.m[14]=-(r2.x*t.x+r2.y*t.y+r2.z*t.z);return r;}
+T decomp(const M&m){T t;t.p=V{m.m[12],m.m[13],m.m[14]};
+ float sx=sqrtf(m.m[0]*m.m[0]+m.m[1]*m.m[1]+m.m[2]*m.m[2]),sy=sqrtf(m.m[4]*m.m[4]+m.m[5]*m.m[5]+m.m[6]*m.m[6]),sz=sqrtf(m.m[8]*m.m[8]+m.m[9]*m.m[9]+m.m[10]*m.m[10]);
+ if(sx>1e-8f&&sy>1e-8f&&sz>1e-8f){t.s=V{sx,sy,sz};t.r.y=asinf(std::clamp(-m.m[2]/sx,-1.f,1.f));t.r.x=atan2f(m.m[6]/sy,m.m[10]/sz);t.r.z=atan2f(m.m[1]/sx,m.m[0]/sx);}
+ return t;}
+void rotateWorld(Obj&ob,int a,float ang){
+ M Pr=id();if(ob.parent>=0){M Pw=worldM(ob.parent);for(int c=0;c<3;c++){float L=sqrtf(Pw.m[c*4]*Pw.m[c*4]+Pw.m[c*4+1]*Pw.m[c*4+1]+Pw.m[c*4+2]*Pw.m[c*4+2]);
+  if(L>1e-8f)for(int r=0;r<3;r++)Pr.m[c*4+r]=Pw.m[c*4+r]/L;}}
+ M Pi=id();for(int c=0;c<3;c++)for(int r=0;r<3;r++)Pi.m[c*4+r]=Pr.m[r*4+c];
+ T tt=ob.cur;tt.p=V{0,0,0};tt.s=V{1,1,1};M Lr=model(tt);
+ M R=id();float c_=cosf(ang),s_=sinf(ang);
+ if(a==0){R.m[5]=c_;R.m[6]=s_;R.m[9]=-s_;R.m[10]=c_;}else if(a==1){R.m[0]=c_;R.m[2]=-s_;R.m[8]=s_;R.m[10]=c_;}else{R.m[0]=c_;R.m[1]=s_;R.m[4]=-s_;R.m[5]=c_;}
+ M Ln=mul(Pi,mul(R,mul(Pr,Lr)));ob.cur.r=decomp(Ln).r;}
 void addObj(int mesh){
  static const V pal[]={{.9f,.35f,.3f},{.3f,.7f,.9f},{.5f,.85f,.4f},{.95f,.8f,.3f},{.7f,.45f,.9f}};
  Obj o;o.mesh=mesh;o.col=pal[objs.size()%5];static int cnt[6]={0,0,0,0,0,0};static const char*NM[6]={"Cube","Sphere","Plane","","","Bone"};snprintf(o.nm,24,"%s.%03d",NM[mesh],++cnt[mesh]);
  if(mesh==5){o.col={.85f,.85f,.65f};o.cur.p={0,0,0};if(sel>=0&&objs[sel].mesh==5){o.parent=sel;o.cur.p={0,objs[sel].len,0};}}
  else{o.cur.p={(objs.size()%4)*1.4f-2.1f,mesh==2?0.f:.5f,0};if(mesh==2)o.cur.s={2,2,2};}
  objs.push_back(o);sel=(int)objs.size()-1;}
-void clearParent(int c){V w=wp(c);objs[c].parent=-1;objs[c].cur.p=w;}
-void delObj(int i){for(int j=0;j<(int)objs.size();j++)if(objs[j].parent==i)clearParent(j);
+void clearParent(int c){M w=worldM(c);objs[c].parent=-1;objs[c].cur=decomp(w);}
+void delObj(int i){
+ for(auto&sk:skins){if(sk.fz.size()<sk.j.size())sk.fz.assign(sk.j.size(),id());for(size_t k=0;k<sk.j.size();k++)if(sk.j[k]==i){sk.fz[k]=worldM(i);sk.j[k]=-1;}}
+ int gp=objs[i].parent;
+ for(int j=0;j<(int)objs.size();j++)if(objs[j].parent==i){M w=worldM(j);objs[j].parent=gp;objs[j].cur=decomp(gp>=0?mul(invAff(worldM(gp)),w):w);}
  objs.erase(objs.begin()+i);for(auto&o:objs)if(o.parent>i)o.parent--;sel=-1;
- for(auto&sk:skins)for(auto&jj:sk.j){if(jj==i)jj=-1;else if(jj>i)jj--;}}
+ for(auto&sk:skins)for(auto&jj:sk.j)if(jj>i)jj--;}
 
 // ---------- GL ----------
 const char*VS=R"(#version 300 es
@@ -292,7 +319,7 @@ std::string fm(const char*f,...){char b[1024];va_list a;va_start(a,f);vsnprintf(
 void insertKey(){if(sel<0)return;Obj&o=objs[sel];bool f=false;for(auto&k:o.k)if(fabsf(k.t-tm)<.02f){k.x=o.cur;f=true;}
  if(!f){o.k.push_back({tm,o.cur});std::sort(o.k.begin(),o.k.end(),[](const Key&a,const Key&b){return a.t<b.t;});}}
 void setParent(int c,int p){for(int a=p;a>=0;a=objs[a].parent)if(a==c){toast("Nao pode: ciclo");return;}
- V w=wp(c);objs[c].parent=p;objs[c].cur.p=invPt(worldM(p),w);toast("Parent definido");}
+ M w=worldM(c);objs[c].parent=p;objs[c].cur=decomp(mul(invAff(worldM(p)),w));toast("Parent definido");}
 void finishParent(int h){parentMode=false;if(sel>=0&&h>=0&&h!=sel)setParent(sel,h);else toast("Cancelado");}
 FILE*openOut(const char*ext,std::string&path,bool&fb){long t=(long)time(nullptr);fb=false;
  path=fm("/storage/emulated/0/Download/nomad_%ld.%s",t,ext);FILE*f=fopen(path.c_str(),"wb");
@@ -484,7 +511,7 @@ void importGLTF(const std::string&path){
  for(size_t si=0;si<d->skins_count;si++){cgltf_skin&cs=d->skins[si];Skin sk;
   for(size_t k=0;k<cs.joints_count;k++){sk.j.push_back(base+(int)(cs.joints[k]-d->nodes));M im=id();
    if(cs.inverse_bind_matrices){float f16[16];cgltf_accessor_read_float(cs.inverse_bind_matrices,k,f16,16);memcpy(im.m,f16,sizeof im.m);}sk.ibm.push_back(im);}
-  skins.push_back(sk);}
+  sk.fz.assign(sk.j.size(),id());skins.push_back(sk);}
  if(nn){float R=0;for(size_t i=0;i<nn;i++){Obj&o=objs[base+i];if(o.mesh==5)continue;M w=worldM(base+(int)i);V c{w.m[12],w.m[13],w.m[14]};
    float sc=std::max({sqrtf(w.m[0]*w.m[0]+w.m[1]*w.m[1]+w.m[2]*w.m[2]),sqrtf(w.m[4]*w.m[4]+w.m[5]*w.m[5]+w.m[6]*w.m[6]),sqrtf(w.m[8]*w.m[8]+w.m[9]*w.m[9]+w.m[10]*w.m[10])});
    R=std::max(R,sqrtf(dot(c,c))+meshes[o.mesh].rad*sc);}
@@ -557,7 +584,7 @@ void runPost(){
  glUniform1i(uCC,0);glUniform1i(uCA,1);glUniform2f(uCT,1.f/gHW,1.f/gHH);glUniform1f(uCS,gAOs);glDrawArrays(GL_TRIANGLES,0,6);
  glActiveTexture(GL_TEXTURE0);glEnable(GL_BLEND);glUseProgram(gProg);}
 bool setJoints(int si){if(si<0||si>=(int)skins.size())return false;Skin&sk=skins[si];int n=std::min((int)sk.j.size(),64);static M J[64];
- for(int k=0;k<n;k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):id();J[k]=mul(jw,sk.ibm[k]);}
+ for(int k=0;k<n;k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<(int)sk.fz.size()?sk.fz[k]:id());J[k]=mul(jw,sk.ibm[k]);}
  glUniformMatrix4fv(uJL,n,GL_FALSE,J[0].m);return true;}
 void drawBones(){for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];if(o.mesh!=5)continue;M mod=worldM(i);float wd=o.len*.35f;
   for(int k=0;k<4;k++){mod.m[k]*=wd;mod.m[4+k]*=o.len;mod.m[8+k]*=wd;}
@@ -585,7 +612,7 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v11   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+  float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v12   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
  {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
   for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
  { // painel de render (esquerda)
@@ -686,7 +713,7 @@ void orbit(float dx,float dy){yaw-=dx*.006f;pitch=std::clamp(pitch+dy*.006f,-1.5
 void gdrag(float dx,float dy){
  Obj&ob=objs[sel];T&t=ob.cur;V o=wp(sel);float ox,oy,ex,ey;
  if(tool==1){float px,py,qx,qy;if(!prj(ringPt(gAxis,gIdx+1),px,py)||!prj(ringPt(gAxis,gIdx+31),qx,qy))return;
-  float vx=px-qx,vy=py-qy,l=hypotf(vx,vy);if(l<1)return;(&t.r.x)[gAxis]+=(dx*vx+dy*vy)/l*.012f;return;}
+  float vx=px-qx,vy=py-qy,l=hypotf(vx,vy);if(l<1)return;rotateWorld(ob,gAxis,(dx*vx+dy*vy)/l*.012f);return;}
  if(!prj(o,ox,oy)||!prj(o+AX[gAxis]*gl(),ex,ey))return;
  float vx=ex-ox,vy=ey-oy,k=(dx*vx+dy*vy)/(vx*vx+vy*vy+1e-3f);
  if(tool==0){V nw=o+AX[gAxis]*(k*gl());t.p=ob.parent>=0?invPt(worldM(ob.parent),nw):nw;}
