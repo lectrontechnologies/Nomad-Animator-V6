@@ -82,7 +82,7 @@ jobs:
           add_library(glue STATIC ${GLUE}/android_native_app_glue.c)
           target_include_directories(glue PUBLIC ${GLUE})
           add_library(nomad SHARED main.cpp)
-          target_link_libraries(nomad glue android EGL GLESv3 log z)
+          target_link_libraries(nomad glue android EGL GLESv3 log z mediandk)
           set_target_properties(nomad PROPERTIES LINK_FLAGS "-u ANativeActivity_onCreate")
           PMEOF
           mkdir -p src/main/cpp
@@ -114,6 +114,13 @@ jobs:
           #include <sys/stat.h>
           #include <zlib.h>
           #include <cctype>
+          #include <cerrno>
+          #include <fcntl.h>
+          #include <unistd.h>
+          #include <android/window.h>
+          #include <media/NdkMediaCodec.h>
+          #include <media/NdkMediaFormat.h>
+          #include <media/NdkMediaMuxer.h>
           #define PI 3.14159265f
 
           // ---------- matematica ----------
@@ -981,6 +988,101 @@ jobs:
            for(int y=0;y<gMcH/2;y++)for(int x=0;x<gMcW*4;x++)std::swap(px[(size_t)y*gMcW*4+x],px[(size_t)(gMcH-1-y)*gMcW*4+x]);
            std::string path;bool fb;FILE*f=openOut("png",path,fb);if(!f){toast("Erro ao salvar");return;}
            stbi_write_png_to_func(mcWrite,f,gMcW,gMcH,4,px.data(),gMcW*4);fclose(f);saved(path,fb);}
+          // ---------- render de video (MP4 via MediaCodec; plano B: sequencia de PNG) ----------
+          struct Vid{bool on=false,png=false,mxOn=false,fb=false;int f0=1,f1=1,f=1,done=0,total=1,vw=0,vh=0,cf=21,stage=0,fd=-1,trk=-1;float tm0=0;AMediaCodec*cd=nullptr;AMediaMuxer*mx=nullptr;std::string path,dir;};
+          Vid gVid;
+          bool vidDrain(bool eos){ // esvazia a saida do codec; true quando chegou o fim do stream
+           AMediaCodecBufferInfo info;
+           for(int guard=0;guard<(eos?300:64);guard++){
+            ssize_t o=AMediaCodec_dequeueOutputBuffer(gVid.cd,&info,eos?10000:0);
+            if(o==-1){if(!eos)return false;continue;} // sem saida ainda
+            if(o==-2){AMediaFormat*of=AMediaCodec_getOutputFormat(gVid.cd);gVid.trk=(int)AMediaMuxer_addTrack(gVid.mx,of);AMediaFormat_delete(of);AMediaMuxer_start(gVid.mx);gVid.mxOn=true;continue;}
+            if(o<0)continue;
+            size_t sz=0;uint8_t*b=AMediaCodec_getOutputBuffer(gVid.cd,(size_t)o,&sz);
+            if(info.flags&2)info.size=0; // dados de configuracao ja vao no formato
+            if(gVid.mxOn&&info.size>0&&b)AMediaMuxer_writeSampleData(gVid.mx,(size_t)gVid.trk,b,&info);
+            bool end=(info.flags&4)!=0;
+            AMediaCodec_releaseOutputBuffer(gVid.cd,(size_t)o,false);
+            if(end)return true;}
+           return false;}
+          void vidEncClose(bool flush){
+           if(gVid.cd){
+            if(flush){ssize_t ii=-1;for(int k=0;k<50&&ii<0;k++){ii=AMediaCodec_dequeueInputBuffer(gVid.cd,10000);if(ii<0)vidDrain(false);}
+             if(ii>=0){AMediaCodec_queueInputBuffer(gVid.cd,(size_t)ii,0,0,(uint64_t)gVid.done*1000000/24,4);for(int k=0;k<20;k++)if(vidDrain(true))break;}}
+            AMediaCodec_stop(gVid.cd);AMediaCodec_delete(gVid.cd);gVid.cd=nullptr;}
+           if(gVid.mx){if(gVid.mxOn)AMediaMuxer_stop(gVid.mx);AMediaMuxer_delete(gVid.mx);gVid.mx=nullptr;gVid.mxOn=false;}
+           if(gVid.fd>=0){close(gVid.fd);gVid.fd=-1;}}
+          void vidToPng(){ // codec indisponivel: salva uma sequencia de PNG
+           vidEncClose(false);if(!gVid.path.empty()){remove(gVid.path.c_str());gVid.path.clear();}
+           gVid.png=true;long t=(long)time(nullptr);gVid.fb=false;gVid.dir=fm("/storage/emulated/0/Download/nomad_video_%ld",t);
+           if(mkdir(gVid.dir.c_str(),0755)!=0&&errno!=EEXIST){gVid.dir=fm("%s/nomad_video_%ld",gDir,t);gVid.fb=true;mkdir(gVid.dir.c_str(),0755);}}
+          void vidFinish(bool ok){
+           bool png=gVid.png,fb=gVid.fb;int n=gVid.done;std::string p=gVid.path,dr=gVid.dir;float t0=gVid.tm0;
+           vidEncClose(ok&&n>0&&!png);
+           gVid.on=false;gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();tm=t0;applyAnim();
+           if(gApp&&gApp->activity)ANativeActivity_setWindowFlags(gApp->activity,0,AWINDOW_FLAG_KEEP_SCREEN_ON);
+           if(n<=0){if(!png&&!p.empty())remove(p.c_str());toast("Render de video cancelado");return;}
+           const char*nota=fb?"  (ative Acesso a todos os arquivos para salvar em Downloads)":"";
+           if(png)toast(fm("Frames PNG salvos (%d): %s%s",n,dr.c_str(),nota));else toast(fm("Video salvo (%d frames): %s%s",n,p.c_str(),nota));}
+          void rgbaToYuv(const unsigned char*px,int sw,int sh,uint8_t*d){ // px: RGBA de baixo para cima (glReadPixels)
+           int vw=gVid.vw,vh=gVid.vh;uint8_t*yp=d,*up=d+(size_t)vw*vh;
+           auto at=[&](int x,int y)->const unsigned char*{int sx=std::min(sw-1,(int)((long)x*sw/vw)),sy=std::min(sh-1,(int)((long)y*sh/vh));return px+((size_t)(sh-1-sy)*sw+sx)*4;};
+           for(int y=0;y<vh;y++)for(int x=0;x<vw;x++){const unsigned char*p=at(x,y);yp[(size_t)y*vw+x]=(uint8_t)std::clamp(((47*p[0]+157*p[1]+16*p[2]+128)>>8)+16,16,235);}
+           for(int y=0;y<vh/2;y++)for(int x=0;x<vw/2;x++){const unsigned char*p=at(2*x,2*y);const unsigned char*p2=at(2*x+1,2*y+1);
+            int r=(p[0]+p2[0])/2,g=(p[1]+p2[1])/2,b=(p[2]+p2[2])/2;
+            int cu=std::clamp(((-26*r-87*g+112*b+128)>>8)+128,16,240),cv=std::clamp(((112*r-102*g-10*b+128)>>8)+128,16,240);
+            if(gVid.cf==21){up[(size_t)y*vw+2*x]=(uint8_t)cu;up[(size_t)y*vw+2*x+1]=(uint8_t)cv;}
+            else{up[(size_t)y*(vw/2)+x]=(uint8_t)cu;up[(size_t)(vh/2)*(vw/2)+(size_t)y*(vw/2)+x]=(uint8_t)cv;}}}
+          bool vidPush(const unsigned char*px,int sw,int sh){
+           if(!gVid.png){
+            size_t need=(size_t)gVid.vw*gVid.vh*3/2;bool fed=false;
+            for(int tries=0;tries<300&&!fed;tries++){
+             ssize_t ii=AMediaCodec_dequeueInputBuffer(gVid.cd,10000);
+             if(ii>=0){size_t cap=0;uint8_t*b=AMediaCodec_getInputBuffer(gVid.cd,(size_t)ii,&cap);
+              if(!b||cap<need){if(gVid.done==0){vidToPng();break;}return false;}
+              rgbaToYuv(px,sw,sh,b);AMediaCodec_queueInputBuffer(gVid.cd,(size_t)ii,0,need,(uint64_t)gVid.done*1000000/24,0);fed=true;}
+             else vidDrain(false);}
+            if(fed){vidDrain(false);return true;}
+            if(!gVid.png)return false;}
+           std::vector<unsigned char> fl(px,px+(size_t)sw*sh*4);
+           for(int y=0;y<sh/2;y++)for(int x=0;x<sw*4;x++)std::swap(fl[(size_t)y*sw*4+x],fl[(size_t)(sh-1-y)*sw*4+x]);
+           std::string pth=fm("%s/frame_%04d.png",gVid.dir.c_str(),gVid.f);FILE*f=fopen(pth.c_str(),"wb");if(!f)return false;
+           stbi_write_png_to_func(mcWrite,f,sw,sh,4,fl.data(),sw*4);fclose(f);return true;}
+          void vidStart(){
+           if(!gMcOK){toast("Render de video precisa de ES 3.1");return;}
+           if(!filesGranted()){needFiles();return;}
+           gVid=Vid();gVid.f0=std::min(gFS,gFE);gVid.f1=std::max(gFS,gFE);gVid.total=gVid.f1-gVid.f0+1;gVid.f=gVid.f0;gVid.tm0=tm;
+           float sc=std::min(1.f,1920.f/W);int sw=(int)(W*sc),sh=(int)(H*sc);
+           gVid.vw=sw>=1700?1920:1280;gVid.vh=std::max(16,(int)(gVid.vw*(double)sh/std::max(sw,1)+8)/16*16);
+           long t=(long)time(nullptr);bool ok=false;
+           for(int cf:{21,19}){if(ok)break;
+            AMediaFormat*f_=AMediaFormat_new();
+            AMediaFormat_setString(f_,"mime","video/avc");AMediaFormat_setInt32(f_,"width",gVid.vw);AMediaFormat_setInt32(f_,"height",gVid.vh);
+            AMediaFormat_setInt32(f_,"bitrate",std::clamp((int)((double)gVid.vw*gVid.vh*24*.25),2000000,40000000));
+            AMediaFormat_setInt32(f_,"frame-rate",24);AMediaFormat_setInt32(f_,"i-frame-interval",1);AMediaFormat_setInt32(f_,"color-format",cf);
+            AMediaFormat_setInt32(f_,"color-standard",1);AMediaFormat_setInt32(f_,"color-range",2);AMediaFormat_setInt32(f_,"color-transfer",3);
+            AMediaCodec*c=AMediaCodec_createEncoderByType("video/avc");
+            if(c){if(AMediaCodec_configure(c,f_,nullptr,nullptr,1)==AMEDIA_OK&&AMediaCodec_start(c)==AMEDIA_OK){gVid.cd=c;gVid.cf=cf;ok=true;}else AMediaCodec_delete(c);}
+            AMediaFormat_delete(f_);}
+           if(ok){gVid.path=fm("/storage/emulated/0/Download/nomad_%ld.mp4",t);gVid.fd=open(gVid.path.c_str(),O_CREAT|O_RDWR|O_TRUNC,0644);
+            if(gVid.fd<0){gVid.path=fm("%s/nomad_%ld.mp4",gDir,t);gVid.fb=true;gVid.fd=open(gVid.path.c_str(),O_CREAT|O_RDWR|O_TRUNC,0644);}
+            if(gVid.fd>=0)gVid.mx=AMediaMuxer_new(gVid.fd,AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
+            if(!gVid.mx){vidEncClose(false);ok=false;}}
+           if(!ok)vidToPng();
+           gVid.on=true;gVid.stage=0;
+           if(gApp&&gApp->activity)ANativeActivity_setWindowFlags(gApp->activity,AWINDOW_FLAG_KEEP_SCREEN_ON,0);
+           toast(gVid.png?"MP4 indisponivel: salvando sequencia de PNG":"Renderizando video... mantenha o app aberto");}
+          void vidStep(){
+           if(!gVid.on)return;
+           if(gVid.stage==0){tm=gVid.f/24.f;applyAnim();gMcFinal=true;gMcPrev=false;gMcHaveCam=false;gSigS=-1;mcReset();gVid.stage=1;return;}
+           if(!(gMcFinal&&gMcSamples>=gMcSpp&&!gDnDirty&&mcShow()))return;
+           glBindFramebuffer(GL_FRAMEBUFFER,gMcOutF);glViewport(0,0,gMcW,gMcH);mcDraw();
+           std::vector<unsigned char> px((size_t)gMcW*gMcH*4);glReadPixels(0,0,gMcW,gMcH,GL_RGBA,GL_UNSIGNED_BYTE,px.data());
+           glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,W,H);
+           if(!vidPush(px.data(),gMcW,gMcH)){toast("Falha ao gravar frame");vidFinish(true);return;}
+           gVid.done++;gVid.f++;
+           if(gVid.f>gVid.f1){vidFinish(true);return;}
+           gVid.stage=0;}
           // ---------- projeto: novo / salvar / abrir / importar .mad ----------
           struct Rd{const unsigned char*p;size_t n,i=0;bool ok=true;
            uint32_t u(){if(i+4>n){ok=false;return 0;}uint32_t v;memcpy(&v,p+i,4);i+=4;return v;}
@@ -1077,7 +1179,7 @@ jobs:
            glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);glActiveTexture(GL_TEXTURE0);
            for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];if(o.mesh==5)continue;M mod=worldM(i);bool skd=o.skin>=0&&meshes[o.mesh].skinned&&setJoints(o.skin);if(skd)mod=id();gSk=skd?1.f:0.f;float h=(i==sel)?.35f:0;gMR[0]=o.met;gMR[1]=o.rou;gTL[0]=(float)o.tb;gTL[1]=(float)o.tm;gTL[2]=(float)o.tn;gTL[3]=o.ac;
             draw(meshes[o.mesh],mul(gVP,mod),mod,o.col.x+(1-o.col.x)*h,o.col.y+(1-o.col.y)*h,o.col.z+(1-o.col.z)*h,1,1);}
-           gMR[0]=0;gMR[1]=.5f;gSk=0;gTL[0]=gTL[1]=gTL[2]=-1;gTL[3]=0;glActiveTexture(GL_TEXTURE0);if(post)runPost();mcFrame();
+           gMR[0]=0;gMR[1]=.5f;gSk=0;gTL[0]=gTL[1]=gTL[2]=-1;gTL[3]=0;glActiveTexture(GL_TEXTURE0);if(post)runPost();mcFrame();vidStep();
            glDisable(GL_DEPTH_TEST);
            if(gBones)drawBones();
            if(sel>=0&&tool<3)drawGizmo();
@@ -1108,7 +1210,7 @@ jobs:
              rect(x,y,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,1.1f*u);icon2(id,x+bs/2,y+bs/2,bs*.27f,on);gBtn.push_back({{x,y,bs,bs},id});}
             gBtn.push_back({{tbX,tbY,tbW,th_},299});}
            if(gRenderOpen){ // painel Render (viewport + path tracing), recolhivel
-            float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?10:4;
+            float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?11:4;
             panel(px,py,pw2,rh*nr+1.6f*u,1*u);
             sld(2,px,pw2,y1,rh,tp2,"AO",gAOs);
             pill(px+1.2f*u,y1+rh+.3f*u,bw_,bh_,16,(gSSAO&&gPostOK)?"SSAO: on":"SSAO: off",gSSAO,.3f,.3f,.33f);
@@ -1121,7 +1223,8 @@ jobs:
              pill(px+1.2f*u,y2+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
              pill(px+1.2f*u,y2+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
              pill(px+1.2f*u,y2+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
-             char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y2+6*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
+            pill(px+1.2f*u,y2+6*rh,bw_,bh_,36,gVid.on?fm("Parar video %d/%d",gVid.done,gVid.total).c_str():fm("Render video %d-%d",std::min(gFS,gFE),std::max(gFS,gFE)).c_str(),gVid.on,.5f,.34f,.12f);
+             char sb[64];if(gVid.on)snprintf(sb,64,"Frame %d  %d/%d  %d/%d spp",gVid.f,gVid.done,gVid.total,gMcSamples,gMcSpp);else snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y2+7*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
             gBtn.push_back({{px,py,pw2,rh*nr+1.6f*u},299});}
            // outliner + transform (direita)
            float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
@@ -1196,6 +1299,7 @@ jobs:
 
           // ---------- input ----------
           void press(int i){
+           if(gVid.on&&i!=36)return;
            if(i>=0&&i<64)gFlash[i]=.35f;
            if(i==60){gFileMenu=!gFileMenu;return;}if(i==61){gRenderOpen=!gRenderOpen;return;}if(i==62){gTlOpen=!gTlOpen;return;}
            if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())pickPath(gFiles[k]);}return;}
@@ -1210,6 +1314,7 @@ jobs:
            else if(i==40)newProject();
            else if(i==42){if(!filesGranted())needFiles();else saveProject();}
            else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
+           else if(i==36){if(gVid.on)vidFinish(true);else vidStart();}
            else if(i==16)gSSAO=!gSSAO;
            else if(i==17)gBones=!gBones;
            else if(i==30){gMcPrev=!gMcPrev;if(gMcPrev)gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();}
@@ -1258,6 +1363,7 @@ jobs:
             moved=false;rl=true;sx=x;sy=y;pinch=0;gDrag=false;mode=-1;
             if(gImportOpen&&!gFiles.empty()&&inR(gListR,x,y)){mode=30;gSY0=y;gSS0=gScrollPx;}
             for(auto&b:gBtn)if(mode<0&&inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
+            if(gVid.on&&mode<0)mode=2;
             if(mode<0&&gImportOpen){gImportOpen=false;mode=2;}
             if(mode<0&&gFileMenu){gFileMenu=false;mode=2;}
             if(mode<0){
@@ -1285,7 +1391,7 @@ jobs:
            return 1;}
           void onCmd(android_app*a,int32_t c){
            if(c==APP_CMD_INIT_WINDOW&&a->window){if(initEGL(a->window)){initGL();ready=true;}}
-           else if(c==APP_CMD_TERM_WINDOW){ready=false;termEGL();}}
+           else if(c==APP_CMD_TERM_WINDOW){if(gVid.on)vidFinish(true);ready=false;termEGL();}}
 
           void android_main(android_app*app){
            app->onAppCmd=onCmd;app->onInputEvent=onInput;
