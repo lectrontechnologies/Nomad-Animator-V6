@@ -311,7 +311,11 @@ void drawGizmo(){
  auto box=[&](V c,V sc,const float*k,int ms=0){T t;t.p=c;t.s=sc;M m=model(t);draw(meshes[ms],mul(gVP,m),m,k[0],k[1],k[2],1,0);};
  static const float Y[3]={1,.9f,.2f};
  for(int a=0;a<3;a++){const float*k=(gDrag&&a==gAxis)?Y:AC[a];
-  if(tool==1){for(int i=0;i<32;i++)box(ringPt(a,i),V{th*3,th*3,th*3},k,1);}
+  if(tool==1){const int NS=72;float R=L*.8f,tk=th*2.f;V pts[NS+1];V ce=camEye();
+   for(int i=0;i<=NS;i++){float an=i*2*PI/NS,c=cosf(an)*R,s=sinf(an)*R;pts[i]=a==0?p+V{0,c,s}:a==1?p+V{s,0,c}:p+V{c,s,0};}
+   for(int i=0;i<NS;i++){V d=pts[i+1]-pts[i];float sl=sqrtf(dot(d,d));V e1=d*(1/sl),mid=(pts[i]+pts[i+1])*.5f,rd=norm(mid-p),e3=norm(cross(e1,rd));
+    M m={};float*q=m.m;q[0]=e1.x*sl*1.2f;q[1]=e1.y*sl*1.2f;q[2]=e1.z*sl*1.2f;q[4]=rd.x*tk;q[5]=rd.y*tk;q[6]=rd.z*tk;q[8]=e3.x*tk;q[9]=e3.y*tk;q[10]=e3.z*tk;q[12]=mid.x;q[13]=mid.y;q[14]=mid.z;q[15]=1;
+    float al=dot(mid-p,ce-p)<0?.3f:1.f;draw(meshes[0],mul(gVP,m),m,k[0],k[1],k[2],al,0);}}
   else{V sc{th,th,th};(&sc.x)[a]=L;box(p+AX[a]*(L*.5f),sc,k);float e=th*(tool==2?7.f:4.f);box(p+AX[a]*L,V{e,e,e},k,1);}}}
 struct ND{float x,y,z;int a;bool pos;};
 float navR(){return H*.1f;} float navX(){return W-ML()-navR()-H*.01f;} float navY(){return H*.072f+navR()+H*.02f;}
@@ -405,6 +409,7 @@ void exportGLTF(){
  js+="\"accessors\":["+accs+"],\"bufferViews\":["+views+"],\"buffers\":[{\"byteLength\":"+std::to_string(bin.size())+",\"uri\":\"data:application/octet-stream;base64,"+b64(bin)+"\"}]}";
  fwrite(js.data(),1,js.size(),f);fclose(f);saved(path,fb);}
 // ---------- icones, importacao glTF ----------
+Rc gListR={0,0,0,0};float gScrollPx=0,gSY0=0,gSS0=0,gRowH=1;
 float gFlash[64]={};bool gFileMenu=false,gRenderOpen=false,gTlOpen=true;bool gImportOpen=false;int gPick=0;std::vector<std::string> gFiles;
 void icon2(int id,float cx,float cy,float s,bool on){
  if(id>=3&&id<=6){icon(id,cx,cy,s,on);return;}
@@ -492,7 +497,7 @@ void scanDir(const std::string&dp,int depth,std::vector<std::pair<time_t,std::st
  closedir(d);}
 void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;
  scanDir("/storage/emulated/0/Download",1,v);scanDir(gDir,1,v);
- std::sort(v.rbegin(),v.rend());for(size_t i=0;i<v.size()&&i<8;i++)gFiles.push_back(v[i].second);}
+ std::sort(v.rbegin(),v.rend());for(size_t i=0;i<v.size()&&i<200;i++)gFiles.push_back(v[i].second);}
 // ---------- texturas (array 1024x1024, ate 16 imagens) ----------
 const int TEXN=1024,TEXMAX=16;GLuint gTexArr=0;std::vector<std::vector<unsigned char>> gTexCpu;
 void initTexArr(){gTexArr=0;if(gTexCpu.empty())return;glActiveTexture(GL_TEXTURE0);glGenTextures(1,&gTexArr);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);
@@ -987,32 +992,31 @@ void frame(){
  glDisable(GL_DEPTH_TEST);
  if(gBones)drawBones();
  if(sel>=0&&tool<3)drawGizmo();
- gBtn.clear();gBlock.clear();float u=U(),ML_=ML(),hH=7.2f*u;
+ gBtn.clear();gBlock.clear();float u=U(),ML_=ML(),hH=8.6f*u;
  // cabecalho: projeto (esquerda) e menus (direita)
  rect(0,0,W,hH,.15f,.15f,.16f,.96f);gBlock.push_back({0,0,(float)W,hH});
  auto sld=[&](int i,float px_,float pw_,float yy,float rh_,float tp_,const char*lab,float v){float lw=9.5f*u,sx=px_+lw,sw=pw_-lw-1.4f*u;text(lab,px_+1.2f*u,yy+rh_/2-2.5f*tp_,tp_,.85f,.85f,.88f);
   rect(sx,yy+rh_/2-.45f*u,sw,.9f*u,.1f,.1f,.11f,1,.45f*u);rect(sx,yy+rh_/2-.45f*u,sw*v,.9f*u,.28f,.45f,.7f,1,.45f*u);
   rect(sx+sw*v-.7f*u,yy+rh_/2-1.1f*u,1.4f*u,2.2f*u,.95f,.95f,.95f,1,.7f*u);gBtn.push_back({{sx-.8f*u,yy,sw+1.6f*u,rh_},300+i});gSlX[i]=sx;gSlW[i]=sw;};
- {static const int PJ[3]={40,41,42};float bs=5.8f*u,gp=.45f*u,x=ML_,by=(hH-bs)/2;
+ {static const int PJ[3]={40,41,42};float bs=7*u,gp=.6f*u,x=ML_,by=(hH-bs)/2;
   for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
   float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v17  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
- {float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,xr=W-ML_;
+ {float ph=6.4f*u,py=(hH-ph)/2,ps=ph*.072f,xr=W-ML_;
   const char*ml[3]={"Arquivo","Render","Timeline"};const int mid[3]={60,61,62};bool mon[3]={gFileMenu,gRenderOpen,gTlOpen};
   for(int k=0;k<3;k++){float w=tw(ml[k],ps)+4*u,x=xr-w;pill(x,py,w,ph,mid[k],ml[k],mon[k],.33f,.33f,.35f);xr=x-.8f*u;}}
  if(gFileMenu){ // menu Arquivo (import/export)
   const char*rl[4]={"Import glTF","Import MAD","Export glTF","Export MAD"};const int rid[4]={15,43,14,13};
-  float mw=22*u,ph=5*u,mx=navX()-navR()-1.5f*u-mw,my=hH+1*u,mh=4*(ph+.5f*u)+1.5f*u;panel(mx,my,mw,mh,1*u);
+  float mw=26*u,ph=6.2f*u,mx=navX()-navR()-1.5f*u-mw,my=hH+1*u,mh=4*(ph+.5f*u)+1.5f*u;panel(mx,my,mw,mh,1*u);
   for(int i=0;i<4;i++){bool on=gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen&&gPick==0)||(rid[i]==43&&gImportOpen&&gPick==2);
    pill(mx+1*u,my+.75f*u+i*(ph+.5f*u),mw-2*u,ph,rid[i],rl[i],on,i<2?.2f:.33f,i<2?.38f:.33f,i<2?.55f:.35f);}
   gBtn.push_back({{mx,my,mw,mh},299});}
- float tbX=ML_,tbY=hH+1.5f*u,tbW=0; // barra de ferramentas vertical (esquerda)
- {static const int RW[12]={0,1,2,10,3,4,5,6,11,12,8,9};static const int GP[12]={0,0,0,0,1,0,0,0,1,0,1,0};
-  float bs=4.8f*u,gp=.35f*u,pad=.5f*u,y=tbY+pad;int ng=0;for(int k=0;k<12;k++)ng+=GP[k];
-  float th_=2*pad+12*bs+11*gp+ng*.9f*u;tbW=bs+2*pad;panel(tbX,tbY,tbW,th_,1*u);
-  for(int k=0;k<12;k++){int id=RW[k];if(GP[k])y+=.9f*u;
+ float tbX=ML_,tbY=hH+1.5f*u,tbW=0; // barra de ferramentas (2 colunas)
+ {static const int C1[6]={0,1,2,10,11,12},C2[6]={3,4,5,6,8,9};
+  float bs=7.2f*u,gp=.5f*u,pad=.6f*u;tbW=2*bs+gp+2*pad;float th_=2*pad+6*bs+5*gp;panel(tbX,tbY,tbW,th_,1*u);
+  for(int c=0;c<2;c++)for(int k=0;k<6;k++){int id=c?C2[k]:C1[k];float x=tbX+pad+c*(bs+gp),y=tbY+pad+k*(bs+gp);
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
-   rect(tbX+pad,y,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,tbX+pad+bs/2,y+bs/2,bs*.27f,on);gBtn.push_back({{tbX+pad,y,bs,bs},id});y+=bs+gp;}
+   rect(x,y,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,1.1f*u);icon2(id,x+bs/2,y+bs/2,bs*.27f,on);gBtn.push_back({{x,y,bs,bs},id});}
   gBtn.push_back({{tbX,tbY,tbW,th_},299});}
  if(gRenderOpen){ // painel Render (viewport + path tracing), recolhivel
   float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?10:4;
@@ -1053,7 +1057,7 @@ void frame(){
  float TH=17.5f*u,tT=100*u-3.6f*u-TH,tw_=W-2*ML_;if(gTlOpen)panel(ML_,tT,tw_,TH,1*u);
  if(gTlOpen){float x0=ML_+.9f*u,wd=tw_-1.8f*u;
   { // linha 1: transporte, frame atual, keys
-   float y=tT+.8f*u,h=5.4f*u,bwt=5.6f*u,gp=.3f*u,x=x0;static const int TID[5]={50,51,52,53,54};
+   float y=tT+.8f*u,h=6.2f*u,bwt=6.4f*u,gp=.3f*u,x=x0;static const int TID[5]={50,51,52,53,54};
    for(int k=0;k<5;k++){bool on=(k==2&&!playing)||(k==1&&playing&&gPlayDir<0)||(k==3&&playing&&gPlayDir>0)||gFlash[TID[k]]>0;
     rect(x,y,bwt,h,on?.28f:.27f,on?.45f:.27f,on?.7f:.29f,1,.7f*u);icon3(TID[k],x+bwt/2,y+h/2,h*.26f,on);gBtn.push_back({{x,y,bwt,h},TID[k]});x+=bwt+gp;}
    x+=1.0f*u;float fw=11*u;rect(x,y,fw,h,.09f,.09f,.1f,1,.7f*u);gFldR[4]={x,y,fw,h};
@@ -1063,7 +1067,7 @@ void frame(){
    x+=1.2f*u;bool kon=gFlash[7]>0;rect(x,y,h,h,kon?.28f:.2f,kon?.45f:.2f,kon?.7f:.22f,1,h/2);icon3(7,x+h/2,y+h/2,h*.28f,false);gBtn.push_back({{x,y,h,h},7});x+=h+.3f*u;
    float dw=3.2f*u;rect(x,y,dw,h,.22f,.22f,.24f,1,.7f*u);icon3(57,x+dw/2,y+h/2,h*.14f,false);gBtn.push_back({{x,y,dw,h},57});}
   { // linha 2: regua
-   float ry=tT+7.0f*u,rh=6.0f*u,ppf;gTX0=x0+.6f*u;gTW=wd-1.2f*u;gTrack={x0,ry,wd,rh};gBlock.push_back(gTrack);
+   float ry=tT+7.4f*u,rh=6.0f*u,ppf;gTX0=x0+.6f*u;gTW=wd-1.2f*u;gTrack={x0,ry,wd,rh};gBlock.push_back(gTrack);
    rect(x0,ry,wd,rh,.12f,.12f,.13f,1,.6f*u);ppf=gTW/(float)std::max(gVE-gVS,1);float yl=ry+4.3f*u;
    if(sel>=0)for(auto&k:objs[sel].k){float kx=tx(k.t);if(kx<gTX0-1||kx>gTX0+gTW+1)continue;float bw3=std::clamp(ppf*.85f,.5f*u,1.8f*u);rect(kx-bw3/2,yl-1.9f*u,bw3,3.8f*u,.3f,.62f,.08f);}
    rect(x0+.3f*u,yl-.05f*u,wd-.6f*u,.1f*u,.6f,.6f,.63f);
@@ -1076,7 +1080,7 @@ void frame(){
     rect(px-.06f*u,ry+3.6f*u,.12f*u,rh-3.6f*u,1,1,1);rect(px-bw3/2-.15f*u,ry+.1f*u,bw3+.3f*u,3.5f*u,.95f,.95f,.95f,1,.6f*u);
     rect(px-bw3/2,ry+.25f*u,bw3,3.2f*u,.05f,.05f,.06f,1,.5f*u);tcen(b,px,ry+1.85f*u,.4f*u,1,1,1);dia(px,ry+3.6f*u,1.4f*u,.95f,.95f,.95f);}}
   { // linha 3: intervalo global e janela visivel
-   float ry3=tT+13.6f*u,h3=3.4f*u,fw3=8.2f*u;
+   float ry3=tT+13.9f*u,h3=3.4f*u,fw3=8.2f*u;
    gFldR[0]={x0,ry3,fw3,h3};gFldR[1]={x0+fw3+.6f*u,ry3,fw3,h3};gFldR[2]={x0+wd-2*fw3-.6f*u,ry3,fw3,h3};gFldR[3]={x0+wd-fw3,ry3,fw3,h3};
    int vals[4]={gFS,gVS,gVE,gFE};
    for(int k=0;k<4;k++){bool inn=k==1||k==2;rect(gFldR[k].x,ry3,fw3,h3,inn?.07f:.16f,inn?.07f:.16f,inn?.08f:.18f,1,.5f*u);
@@ -1085,14 +1089,18 @@ void frame(){
    float rng=(float)std::max(gFE-gFS,1),b0=gTrX0+(gVS-gFS)/rng*gTrW,b1=gTrX0+(gVE-gFS)/rng*gTrW,cy=ry3+h3/2;
    rect(gTrX0,cy-.2f*u,gTrW,.4f*u,.07f,.07f,.08f,1,.2f*u);rect(b0,cy-.35f*u,std::max(b1-b0,.5f*u),.7f*u,.55f,.55f,.58f,1,.3f*u);
    rect(b0-.5f*u,ry3+.3f*u,1.0f*u,h3-.6f*u,.75f,.75f,.78f,1,.3f*u);rect(b1-.5f*u,ry3+.3f*u,1.0f*u,h3-.6f*u,.75f,.75f,.78f,1,.3f*u);}}
- if(gImportOpen){float pw2=82*u,rh2=4.8f*u,tp2=.42f*u;int n=std::max((int)gFiles.size(),1);float ph2=6.5f*u+n*rh2+1.5f*u,px2=(W-pw2)/2,py2=(H-ph2)/2;
-  panel(px2,py2,pw2,ph2,1.2f*u);text((gPick==0?"Importar glTF / GLB / ZIP":gPick==1?"Abrir projeto (.mad)":"Importar .mad"),px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
-  if(gFiles.empty()){text((gPick==0?"Nenhum .gltf/.glb/.zip em Download.":"Nenhum .mad em Download."),px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
-   text("Ative Acesso a todos os arquivos nas permissoes do app.",px2+2*u,py2+8.1f*u+rh2-2.5f*tp2,tp2*.9f,.6f,.6f,.65f);}
-  for(size_t i=0;i<gFiles.size();i++){float yy=py2+6.5f*u+i*rh2;rect(px2+1*u,yy,pw2-2*u,rh2-.4f*u,.24f,.24f,.27f,1,.7f*u);
-   std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>38)nf=nf.substr(nf.size()-38);
-   text(nf.c_str(),px2+2.5f*u,yy+rh2/2-.2f*u-2.5f*tp2,tp2,.95f,.95f,.95f);gBtn.push_back({{px2+1*u,yy,pw2-2*u,rh2},200+(int)i});}
-  gBtn.push_back({{px2,py2,pw2,ph2},299});}
+ if(gImportOpen){float pw2=82*u,rh2=5.8f*u,tp2=.46f*u;int n=(int)gFiles.size();float lh=6*rh2,ph2=6.5f*u+lh+1.5f*u,px2=(W-pw2)/2,py2=(H-ph2)/2;
+             float tot=n*rh2,maxs=std::max(0.f,tot-lh);gScrollPx=std::clamp(gScrollPx,0.f,maxs);gRowH=rh2;gListR={px2+1*u,py2+6.5f*u,pw2-2*u,lh};
+             panel(px2,py2,pw2,ph2,1.2f*u);text((gPick==0?"Importar glTF / GLB / ZIP":gPick==1?"Abrir projeto (.mad)":"Importar .mad"),px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
+             if(gFiles.empty()){text((gPick==0?"Nenhum .gltf/.glb/.zip em Download.":"Nenhum .mad em Download."),px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
+              text("Ative Acesso a todos os arquivos nas permissoes do app.",px2+2*u,py2+8.1f*u+rh2-2.5f*tp2,tp2*.9f,.6f,.6f,.65f);}
+             else{glEnable(GL_SCISSOR_TEST);glScissor((GLint)gListR.x,(GLint)(H-gListR.y-gListR.h),(GLsizei)gListR.w,(GLsizei)gListR.h);
+              for(int i=0;i<n;i++){float yy=gListR.y+i*rh2-gScrollPx;if(yy+rh2<gListR.y||yy>gListR.y+lh)continue;rect(px2+1*u,yy,pw2-2*u-1.6f*u,rh2-.5f*u,.24f,.24f,.27f,1,.7f*u);
+               std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>34)nf=nf.substr(nf.size()-34);
+               text(nf.c_str(),px2+2.5f*u,yy+rh2/2-.25f*u-2.5f*tp2,tp2,.95f,.95f,.95f);}
+              glDisable(GL_SCISSOR_TEST);
+              if(maxs>0){float bh_=lh*lh/tot,by_=gListR.y+(lh-bh_)*(gScrollPx/maxs);rect(px2+pw2-1.8f*u,by_,.6f*u,bh_,.6f,.6f,.65f,1,.3f*u);}}
+             gBtn.push_back({{px2,py2,pw2,ph2},299});}
  if(gToastT>0){float tt=.4f*u,w2=tw(gToast.c_str(),tt)+4*u,bx=(W-w2)/2,by=(gTlOpen?tT:100*u-3.6f*u)-7*u;rect(bx,by,w2,5.4f*u,.08f,.08f,.08f,.93f,1*u);text(gToast.c_str(),bx+2*u,by+2.7f*u-2.5f*tt,tt,1,1,1);}
  drawNav();
  eglSwapBuffers(dpy,surf);}
@@ -1109,7 +1117,7 @@ void press(int i){
  else if(i==11){if(sel<0)toast("Selecione um objeto");else{parentMode=true;toast("Toque no objeto PAI");}}
  else if(i==12){if(sel>=0)clearParent(sel);}
  else if(i==13||i==14){gFileMenu=false;if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
- else if(i==15||i==41||i==43){gFileMenu=false;if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gImportOpen=true;}}
+ else if(i==15||i==41||i==43){gFileMenu=false;if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gScrollPx=0;gImportOpen=true;}}
  else if(i==40)newProject();
  else if(i==42){if(!filesGranted())needFiles();else saveProject();}
  else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
@@ -1138,6 +1146,7 @@ void pick(float x,float y){
   V oc=e-c;float b=dot(oc,d),cc=dot(oc,oc)-r*r,ds=b*b-cc;if(ds<0)continue;
   float tt=-b-sqrtf(ds);if(tt>0&&tt<bt){bt=tt;best=i;}}
  if(parentMode)finishParent(best);else sel=best;}
+void panCam(float dx,float dy){V e=camEye(),f=norm(tgt-e),r=norm(cross(f,V{0,1,0})),u=cross(r,f);float s=2*cd*tanf(FOV/2)/H;tgt=tgt+r*(-dx*s)+u*(dy*s);}
 void orbit(float dx,float dy){yaw-=dx*.006f;pitch=std::clamp(pitch+dy*.006f,-1.5f,1.5f);}
 void gdrag(float dx,float dy){
  Obj&ob=objs[sel];T&t=ob.cur;V o=wp(sel);float ox,oy,ex,ey;
@@ -1152,13 +1161,14 @@ void snap(float x,float y){ND d[6];navPts(d);
  for(auto&e:d)if(hypotf(x-e.x,y-e.y)<H*.035f){
   if(e.a==0){yaw=e.pos?PI/2:-PI/2;pitch=0;}else if(e.a==1)pitch=e.pos?1.45f:-1.45f;else{yaw=e.pos?0.f:PI;pitch=0;}return;}}
 int32_t onInput(android_app*,AInputEvent*e){
- static int mode=0;static float lx,ly,sx,sy,pinch;static bool moved,rl;
+ static int mode=0;static float lx,ly,sx,sy,pinch,lmx,lmy;static bool moved,rl;
  if(AInputEvent_getType(e)!=AINPUT_EVENT_TYPE_MOTION)return 0;
  int act=AMotionEvent_getAction(e)&AMOTION_EVENT_ACTION_MASK,n=(int)AMotionEvent_getPointerCount(e);
  float x=AMotionEvent_getX(e,0),y=AMotionEvent_getY(e,0);
  if(act==AMOTION_EVENT_ACTION_DOWN){
   moved=false;rl=true;sx=x;sy=y;pinch=0;gDrag=false;mode=-1;
-  for(auto&b:gBtn)if(inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
+  if(gImportOpen&&!gFiles.empty()&&inR(gListR,x,y)){mode=30;gSY0=y;gSS0=gScrollPx;}
+  for(auto&b:gBtn)if(mode<0&&inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
   if(mode<0&&gImportOpen){gImportOpen=false;mode=2;}
   if(mode<0&&gFileMenu){gFileMenu=false;mode=2;}
   if(mode<0){
@@ -1170,16 +1180,18 @@ int32_t onInput(android_app*,AInputEvent*e){
  }else if(act==AMOTION_EVENT_ACTION_POINTER_DOWN){moved=true;rl=true;pinch=0;}
  else if(act==AMOTION_EVENT_ACTION_POINTER_UP){rl=true;pinch=0;}
  else if(act==AMOTION_EVENT_ACTION_MOVE){
-  if(mode==3)scrub(x);
+  if(mode==30){float dyy=y-gSY0;if(fabsf(dyy)>12)moved=true;gScrollPx=std::max(0.f,gSS0-dyy);}
+  else if(mode==3)scrub(x);
   else if(mode>=20){if(hypotf(x-sx,y-sy)>20)moved=true;tlDrag(mode,x);}
   else if(mode>=6)setSlider(mode-6,x);
   else if(mode==1&&n>=2){float d=hypotf(AMotionEvent_getX(e,1)-x,AMotionEvent_getY(e,1)-y);
-   if(pinch>0&&d>1)cd=std::clamp(cd*pinch/d,2.f,40.f);pinch=d;moved=true;}
+   float mx=(x+AMotionEvent_getX(e,1))/2,my=(y+AMotionEvent_getY(e,1))/2;if(pinch>0&&d>1){cd=std::clamp(cd*pinch/d,2.f,40.f);panCam(mx-lmx,my-lmy);}pinch=d;lmx=mx;lmy=my;moved=true;}
   else if(mode==1||mode==4||mode==5){
    if(rl){rl=false;lx=x;ly=y;}
    else{float dx=x-lx,dy=y-ly;lx=x;ly=y;if(hypotf(x-sx,y-sy)>20)moved=true;
-    if(mode==5)gdrag(dx,dy);else if(moved)orbit(dx,dy);}}
+    if(mode==5)gdrag(dx,dy);else if(moved){if(tool==3&&mode==1)panCam(dx,dy);else orbit(dx,dy);}}}
  }else if(act==AMOTION_EVENT_ACTION_UP||act==AMOTION_EVENT_ACTION_CANCEL){
+  if(mode==30&&!moved&&gImportOpen){int k=(int)floorf((y-gListR.y+gScrollPx)/gRowH);if(k>=0&&k<(int)gFiles.size()){gImportOpen=false;pickPath(gFiles[k]);}}
   if(mode==1&&!moved)pick(x,y);if(mode==4&&!moved)snap(x,y);if(mode==27&&!moved)frameTap(x);mode=0;gDrag=false;}
  return 1;}
 void onCmd(android_app*a,int32_t c){
