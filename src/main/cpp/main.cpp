@@ -405,7 +405,7 @@ void exportGLTF(){
  js+="\"accessors\":["+accs+"],\"bufferViews\":["+views+"],\"buffers\":[{\"byteLength\":"+std::to_string(bin.size())+",\"uri\":\"data:application/octet-stream;base64,"+b64(bin)+"\"}]}";
  fwrite(js.data(),1,js.size(),f);fclose(f);saved(path,fb);}
 // ---------- icones, importacao glTF ----------
-float gFlash[64]={};bool gImportOpen=false;int gPick=0;std::vector<std::string> gFiles;
+float gFlash[64]={};bool gFileMenu=false,gRenderOpen=false,gTlOpen=true;bool gImportOpen=false;int gPick=0;std::vector<std::string> gFiles;
 void icon2(int id,float cx,float cy,float s,bool on){
  if(id>=3&&id<=6){icon(id,cx,cy,s,on);return;}
  const float c=.93f;
@@ -988,45 +988,48 @@ void frame(){
  if(gBones)drawBones();
  if(sel>=0&&tool<3)drawGizmo();
  gBtn.clear();gBlock.clear();float u=U(),ML_=ML(),hH=7.2f*u;
- // cabecalho: icones pequenos a esquerda
+ // cabecalho: projeto (esquerda) e menus (direita)
  rect(0,0,W,hH,.15f,.15f,.16f,.96f);gBlock.push_back({0,0,(float)W,hH});
- {static const int RW[12]={0,1,2,10,3,4,5,6,11,12,8,9};static const int GP[12]={0,0,0,0,1,0,0,0,1,0,1,0};
-  float bs=5.8f*u,gp=.45f*u,x=ML_,by=(hH-bs)/2;
-  for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
-   bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
+ auto sld=[&](int i,float px_,float pw_,float yy,float rh_,float tp_,const char*lab,float v){float lw=9.5f*u,sx=px_+lw,sw=pw_-lw-1.4f*u;text(lab,px_+1.2f*u,yy+rh_/2-2.5f*tp_,tp_,.85f,.85f,.88f);
+  rect(sx,yy+rh_/2-.45f*u,sw,.9f*u,.1f,.1f,.11f,1,.45f*u);rect(sx,yy+rh_/2-.45f*u,sw*v,.9f*u,.28f,.45f,.7f,1,.45f*u);
+  rect(sx+sw*v-.7f*u,yy+rh_/2-1.1f*u,1.4f*u,2.2f*u,.95f,.95f,.95f,1,.7f*u);gBtn.push_back({{sx-.8f*u,yy,sw+1.6f*u,rh_},300+i});gSlX[i]=sx;gSlW[i]=sw;};
+ {static const int PJ[3]={40,41,42};float bs=5.8f*u,gp=.45f*u,x=ML_,by=(hH-bs)/2;
+  for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
   float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v17  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
- {float bs=5.8f*u,gp=.45f*u,by=(hH-bs)/2,xr=W-ML_;
-  static const int PJ[3]={42,41,40};
-  for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);float x=xr-bs;
-   rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});xr=x-gp;}
-  xr-=.8f*u;
-  const char*rl[4]={"Import glTF","Import MAD","Export glTF","Export MAD"};const int rid[4]={15,43,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f;
-  for(int i=3;i>=0;i--){float w=tw(rl[i],ps)+4*u,x=xr-w;bool on=gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen&&gPick==0)||(rid[i]==43&&gImportOpen&&gPick==2);
-   pill(x,py,w,ph,rid[i],rl[i],on,i<2?.2f:.33f,i<2?.38f:.33f,i<2?.55f:.35f);xr=x-.8f*u;}}
- { // painel de render (esquerda)
-  float px=ML_,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u;panel(px,py,pw2,rh*5+2.4f*u,1*u);
-  auto sld=[&](int i,float yy,const char*lab,float v){float lw=9.5f*u,sx=px+lw,sw=pw2-lw-1.4f*u;text(lab,px+1.2f*u,yy+rh/2-2.5f*tp2,tp2,.85f,.85f,.88f);
-   rect(sx,yy+rh/2-.45f*u,sw,.9f*u,.1f,.1f,.11f,1,.45f*u);rect(sx,yy+rh/2-.45f*u,sw*v,.9f*u,.28f,.45f,.7f,1,.45f*u);
-   rect(sx+sw*v-.7f*u,yy+rh/2-1.1f*u,1.4f*u,2.2f*u,.95f,.95f,.95f,1,.7f*u);gBtn.push_back({{sx-.8f*u,yy,sw+1.6f*u,rh},300+i});gSlX[i]=sx;gSlW[i]=sw;};
-  float y1=py+1.2f*u;
-  sld(0,y1,"Metal",sel>=0?objs[sel].met:0.f);sld(1,y1+rh,"Rough",sel>=0?objs[sel].rou:.5f);sld(2,y1+2*rh,"AO",gAOs);
-  pill(px+1.2f*u,y1+3*rh+.3f*u,pw2-2.4f*u,rh-.6f*u,16,(gSSAO&&gPostOK)?"SSAO: on":"SSAO: off",gSSAO,.3f,.3f,.33f);
-  pill(px+1.2f*u,y1+4*rh+.3f*u,pw2-2.4f*u,rh-.6f*u,17,gBones?"Bones: on":"Bones: off",gBones,.3f,.3f,.33f);
-  gBtn.push_back({{px,py,pw2,rh*5+2.4f*u},299});}
- { // painel Monte Carlo / path tracing
-  float px=ML_,py=hH+1.5f*u+(5*4.4f+2.4f)*u+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,y1=py+1.0f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u;
-  panel(px,py,pw2,rh*7+1.6f*u,1*u);
-  if(!gMcOK){text("MC indisponivel (precisa de ES 3.1)",px+1.2f*u,y1+rh/2-2.5f*tp2,tp2*.85f,.85f,.55f,.5f);}
-  else{bool done=gMcFinal&&gMcSamples>=gMcSpp;
-   pill(px+1.2f*u,y1,bw_,bh_,30,gMcPrev?"Preview MC: on":"Preview MC: off",gMcPrev,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+rh,bw_,bh_,31,gMcFinal?(done?"Fechar render":"Parar render"):"Render final",gMcFinal,.5f,.34f,.12f);
-   pill(px+1.2f*u,y1+2*rh,bw_,bh_,33,fm("Amostras: %d",gMcSpp).c_str(),false,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
-   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y1+6*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
-  gBtn.push_back({{px,py,pw2,rh*7+1.6f*u},299});}
+ {float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,xr=W-ML_;
+  const char*ml[3]={"Arquivo","Render","Timeline"};const int mid[3]={60,61,62};bool mon[3]={gFileMenu,gRenderOpen,gTlOpen};
+  for(int k=0;k<3;k++){float w=tw(ml[k],ps)+4*u,x=xr-w;pill(x,py,w,ph,mid[k],ml[k],mon[k],.33f,.33f,.35f);xr=x-.8f*u;}}
+ if(gFileMenu){ // menu Arquivo (import/export)
+  const char*rl[4]={"Import glTF","Import MAD","Export glTF","Export MAD"};const int rid[4]={15,43,14,13};
+  float mw=22*u,ph=5*u,mx=navX()-navR()-1.5f*u-mw,my=hH+1*u,mh=4*(ph+.5f*u)+1.5f*u;panel(mx,my,mw,mh,1*u);
+  for(int i=0;i<4;i++){bool on=gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen&&gPick==0)||(rid[i]==43&&gImportOpen&&gPick==2);
+   pill(mx+1*u,my+.75f*u+i*(ph+.5f*u),mw-2*u,ph,rid[i],rl[i],on,i<2?.2f:.33f,i<2?.38f:.33f,i<2?.55f:.35f);}
+  gBtn.push_back({{mx,my,mw,mh},299});}
+ float tbX=ML_,tbY=hH+1.5f*u,tbW=0; // barra de ferramentas vertical (esquerda)
+ {static const int RW[12]={0,1,2,10,3,4,5,6,11,12,8,9};static const int GP[12]={0,0,0,0,1,0,0,0,1,0,1,0};
+  float bs=4.8f*u,gp=.35f*u,pad=.5f*u,y=tbY+pad;int ng=0;for(int k=0;k<12;k++)ng+=GP[k];
+  float th_=2*pad+12*bs+11*gp+ng*.9f*u;tbW=bs+2*pad;panel(tbX,tbY,tbW,th_,1*u);
+  for(int k=0;k<12;k++){int id=RW[k];if(GP[k])y+=.9f*u;
+   bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
+   rect(tbX+pad,y,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,tbX+pad+bs/2,y+bs/2,bs*.27f,on);gBtn.push_back({{tbX+pad,y,bs,bs},id});y+=bs+gp;}
+  gBtn.push_back({{tbX,tbY,tbW,th_},299});}
+ if(gRenderOpen){ // painel Render (viewport + path tracing), recolhivel
+  float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?10:4;
+  panel(px,py,pw2,rh*nr+1.6f*u,1*u);
+  sld(2,px,pw2,y1,rh,tp2,"AO",gAOs);
+  pill(px+1.2f*u,y1+rh+.3f*u,bw_,bh_,16,(gSSAO&&gPostOK)?"SSAO: on":"SSAO: off",gSSAO,.3f,.3f,.33f);
+  pill(px+1.2f*u,y1+2*rh+.3f*u,bw_,bh_,17,gBones?"Bones: on":"Bones: off",gBones,.3f,.3f,.33f);
+  if(!gMcOK){text("MC indisponivel (precisa de ES 3.1)",px+1.2f*u,y1+3*rh+rh/2-2.5f*tp2,tp2*.85f,.85f,.55f,.5f);}
+  else{bool done=gMcFinal&&gMcSamples>=gMcSpp;float y2=y1+3*rh;
+   pill(px+1.2f*u,y2,bw_,bh_,30,gMcPrev?"Preview MC: on":"Preview MC: off",gMcPrev,.3f,.3f,.33f);
+   pill(px+1.2f*u,y2+rh,bw_,bh_,31,gMcFinal?(done?"Fechar render":"Parar render"):"Render final",gMcFinal,.5f,.34f,.12f);
+   pill(px+1.2f*u,y2+2*rh,bw_,bh_,33,fm("Amostras: %d",gMcSpp).c_str(),false,.3f,.3f,.33f);
+   pill(px+1.2f*u,y2+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
+   pill(px+1.2f*u,y2+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
+   pill(px+1.2f*u,y2+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
+   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y2+6*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
+  gBtn.push_back({{px,py,pw2,rh*nr+1.6f*u},299});}
  // outliner + transform (direita)
  float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
  int n=(int)objs.size(),rows=std::min(n,3),st=(n>3&&sel>=0)?std::clamp(sel-2,0,n-3):0;
@@ -1037,17 +1040,18 @@ void frame(){
   if(i==sel)rect(rx+.6f*u,yy,pw-1.2f*u,rh-.2f*u,.28f,.45f,.7f,1,.7f*u);
   rect(rx+1.6f*u,yy+1.3f*u,1.8f*u,1.8f*u,objs[i].col.x,objs[i].col.y,objs[i].col.z,1,.9f*u);
   text(objs[i].nm,rx+4.6f*u,yy+2.2f*u-2.5f*tpx,tpx,.93f,.93f,.93f);gBtn.push_back({{rx,yy,pw,rh},100+i});}
- if(sel>=0){T&t=objs[sel].cur;float ty=ry+oh+1.5f*u;panel(rx,ty,pw,4*u+3*rh+1*u,1*u);
+ if(sel>=0){T&t=objs[sel].cur;float ty=ry+oh+1.5f*u;panel(rx,ty,pw,4*u+5*rh+1*u,1*u);
   
   float lw=5.5f*u,fw=(pw-lw-1.2f*u)/3;static const char*XYZ[3]={"X","Y","Z"};
   for(int j=0;j<3;j++)tcen(XYZ[j],rx+lw+j*fw+fw/2,ty+2*u,tpx,AC[j][0],AC[j][1],AC[j][2]);
   static const char*LB3[3]={"Loc","Rot","Scl"};V val[3]={t.p,t.r*(180/PI),t.s};
   for(int k=0;k<3;k++){float yy=ty+4*u+k*rh;text(LB3[k],rx+1.2f*u,yy+2.2f*u-2.5f*tpx,tpx,.75f,.75f,.78f);
    for(int j=0;j<3;j++){char b[16];snprintf(b,16,k==1?"%.1f":"%.2f",(&val[k].x)[j]);float fx=rx+lw+j*fw;
-    rect(fx,yy+.3f*u,fw-.5f*u,rh-.6f*u,.25f,.25f,.27f,1,.6f*u);tcen(b,fx+(fw-.5f*u)/2,yy+2.2f*u,tpx*.95f,.92f,.92f,.92f);}}}
+    rect(fx,yy+.3f*u,fw-.5f*u,rh-.6f*u,.25f,.25f,.27f,1,.6f*u);tcen(b,fx+(fw-.5f*u)/2,yy+2.2f*u,tpx*.95f,.92f,.92f,.92f);}}
+ sld(0,rx,pw,ty+4*u+3*rh,rh,tpx,"Metal",objs[sel].met);sld(1,rx,pw,ty+4*u+4*rh,rh,tpx,"Rough",objs[sel].rou);}
  // timeline estilo Maya/Houdini (compacta)
- float TH=17.5f*u,tT=100*u-3.6f*u-TH,tw_=W-2*ML_;panel(ML_,tT,tw_,TH,1*u);
- {float x0=ML_+.9f*u,wd=tw_-1.8f*u;
+ float TH=17.5f*u,tT=100*u-3.6f*u-TH,tw_=W-2*ML_;if(gTlOpen)panel(ML_,tT,tw_,TH,1*u);
+ if(gTlOpen){float x0=ML_+.9f*u,wd=tw_-1.8f*u;
   { // linha 1: transporte, frame atual, keys
    float y=tT+.8f*u,h=5.4f*u,bwt=5.6f*u,gp=.3f*u,x=x0;static const int TID[5]={50,51,52,53,54};
    for(int k=0;k<5;k++){bool on=(k==2&&!playing)||(k==1&&playing&&gPlayDir<0)||(k==3&&playing&&gPlayDir>0)||gFlash[TID[k]]>0;
@@ -1089,13 +1093,14 @@ void frame(){
    std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>38)nf=nf.substr(nf.size()-38);
    text(nf.c_str(),px2+2.5f*u,yy+rh2/2-.2f*u-2.5f*tp2,tp2,.95f,.95f,.95f);gBtn.push_back({{px2+1*u,yy,pw2-2*u,rh2},200+(int)i});}
   gBtn.push_back({{px2,py2,pw2,ph2},299});}
- if(gToastT>0){float tt=.4f*u,w2=tw(gToast.c_str(),tt)+4*u,bx=(W-w2)/2,by=tT-7*u;rect(bx,by,w2,5.4f*u,.08f,.08f,.08f,.93f,1*u);text(gToast.c_str(),bx+2*u,by+2.7f*u-2.5f*tt,tt,1,1,1);}
+ if(gToastT>0){float tt=.4f*u,w2=tw(gToast.c_str(),tt)+4*u,bx=(W-w2)/2,by=(gTlOpen?tT:100*u-3.6f*u)-7*u;rect(bx,by,w2,5.4f*u,.08f,.08f,.08f,.93f,1*u);text(gToast.c_str(),bx+2*u,by+2.7f*u-2.5f*tt,tt,1,1,1);}
  drawNav();
  eglSwapBuffers(dpy,surf);}
 
 // ---------- input ----------
 void press(int i){
  if(i>=0&&i<64)gFlash[i]=.35f;
+ if(i==60){gFileMenu=!gFileMenu;return;}if(i==61){gRenderOpen=!gRenderOpen;return;}if(i==62){gTlOpen=!gTlOpen;return;}
  if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())pickPath(gFiles[k]);}return;}
  if(i<3)addObj(i);else if(i<7)tool=i-3;
  else if(i==7)insertKey();else if(i==8){playing=!playing;if(playing)gPlayDir=1;}
@@ -1103,8 +1108,8 @@ void press(int i){
  else if(i==10)addObj(5);
  else if(i==11){if(sel<0)toast("Selecione um objeto");else{parentMode=true;toast("Toque no objeto PAI");}}
  else if(i==12){if(sel>=0)clearParent(sel);}
- else if(i==13||i==14){if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
- else if(i==15||i==41||i==43){if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gImportOpen=true;}}
+ else if(i==13||i==14){gFileMenu=false;if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
+ else if(i==15||i==41||i==43){gFileMenu=false;if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gImportOpen=true;}}
  else if(i==40)newProject();
  else if(i==42){if(!filesGranted())needFiles();else saveProject();}
  else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
@@ -1155,9 +1160,10 @@ int32_t onInput(android_app*,AInputEvent*e){
   moved=false;rl=true;sx=x;sy=y;pinch=0;gDrag=false;mode=-1;
   for(auto&b:gBtn)if(inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
   if(mode<0&&gImportOpen){gImportOpen=false;mode=2;}
+  if(mode<0&&gFileMenu){gFileMenu=false;mode=2;}
   if(mode<0){
-   if(tlHit(x,y,mode)){}
-   else if(inR(gTrack,x,y)){mode=3;scrub(x);}
+   if(gTlOpen&&tlHit(x,y,mode)){}
+   else if(gTlOpen&&inR(gTrack,x,y)){mode=3;scrub(x);}
    else if(hypotf(x-navX(),y-navY())<navR()+12)mode=4;
    else{bool blk=false;for(auto&r:gBlock)if(inR(r,x,y))blk=true;
     if(blk)mode=2;else{int a=hitGizmo(x,y);if(a>=0){gAxis=a;gDrag=true;mode=5;}else mode=1;}}}
