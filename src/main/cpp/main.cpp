@@ -57,7 +57,8 @@ struct Key{float t;T x;};
 struct Obj{int mesh;V col;T cur;std::vector<Key> k;char nm[24]="";int parent=-1;float len=1;float met=0,rou=.5f;int skin=-1;};
 std::vector<Obj> objs;
 int sel=-1,tool=3,W=1,H=1;      // tool: 0 mover,1 girar,2 escalar,3 camera
-bool playing=false;float tm=0;const float DUR=5;
+bool playing=false;float tm=1/24.f;float DUR=10;int gFS=1,gFE=240,gVS=1,gVE=120,gPlayDir=1;
+void syncRange(){DUR=gFE/24.f;if(gVE>gFE)gVE=gFE;if(gVS<gFS)gVS=gFS;if(gVE-gVS<5)gVE=std::min(gFE,gVS+5);}
 float yaw=.6f,pitch=.4f,cd=8;V tgt{0,.5f,0};const float FOV=1.047f;
 V camEye(){return tgt+V{cosf(pitch)*sinf(yaw),sinf(pitch),cosf(pitch)*cosf(yaw)}*cd;}
 static void qmulE(const float*a,const float*b,float*o){o[0]=a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1];o[1]=a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0];
@@ -259,7 +260,7 @@ void icon(int bid,float cx,float cy,float s,bool on){
 const char*BL[10]={"CUBE","SPH","PLN","MOVE","ROT","SCL","CAM","KEY","PLAY","DEL"};
 float BC[10][3]={{.2f,.6f,.3f},{.2f,.6f,.3f},{.2f,.6f,.3f},{.2f,.4f,.8f},{.2f,.4f,.8f},{.2f,.4f,.8f},{.2f,.4f,.8f},{.9f,.75f,.1f},{.9f,.5f,.1f},{.8f,.2f,.2f}};
 float ML(){return W*.04f;} float bw(){return (W-2*ML())/10.f;} float bh(){return H*.1f;} float tlh(){return H*.09f;} float tly(){return H-H*.045f-tlh();}
-float gTX0=0,gTW=1;float tx(float t){return gTX0+t/DUR*gTW;}
+float gTX0=0,gTW=1;float tx(float t){return gTX0+(t*24-gVS)/(float)std::max(gVE-gVS,1)*gTW;}
 
 // ---------- EGL ----------
 EGLDisplay dpy=EGL_NO_DISPLAY;EGLSurface surf=EGL_NO_SURFACE;EGLContext ctx=EGL_NO_CONTEXT;bool ready=false;
@@ -316,7 +317,7 @@ void drawNav(){ND d[6];navPts(d);float R=navR(),cx=navX(),cy=navY();
   rect(e.x-r,e.y-r,2*r,2*r,c[0]*k,c[1]*k,c[2]*k,1,r);
   if(e.pos){float ps=H*.0055f;text(LB[e.a],e.x-tw(LB[e.a],ps)/2,e.y-2.5f*ps,ps,1,1,1);}}}
 // ---------- exportacao (MAD / glTF) + rigging ----------
-bool parentMode=false;std::string gToast;float gToastT=0;const char*gDir=".";
+bool parentMode=false;std::string gToast;float gToastT=0;const char*gDir=".";std::string gProj="projeto";
 void toast(const std::string&t){gToast=t;gToastT=4;}
 std::string fm(const char*f,...){char b[1024];va_list a;va_start(a,f);vsnprintf(b,1024,f,a);va_end(a);return b;}
 void insertKey(){if(sel<0)return;Obj&o=objs[sel];bool f=false;for(auto&k:o.k)if(fabsf(k.t-tm)<.02f){k.x=o.cur;f=true;}
@@ -328,13 +329,21 @@ FILE*openOut(const char*ext,std::string&path,bool&fb){long t=(long)time(nullptr)
  path=fm("/storage/emulated/0/Download/nomad_%ld.%s",t,ext);FILE*f=fopen(path.c_str(),"wb");
  if(!f){path=fm("%s/nomad_%ld.%s",gDir,t,ext);f=fopen(path.c_str(),"wb");fb=true;}return f;}
 void saved(const std::string&path,bool fb){toast("Salvo: "+path+(fb?"  (ative Acesso a todos os arquivos para salvar em Downloads)":""));}
-void exportMAD(){std::string path;bool fb;FILE*f=openOut("mad",path,fb);if(!f){toast("Erro ao salvar");return;}
+void writeMAD(FILE*f){
  auto U_=[&](uint32_t v){fwrite(&v,4,1,f);};auto Fl=[&](float v){fwrite(&v,4,1,f);};
- fwrite("MAD1",1,4,f);U_(1);Fl(24);Fl(DUR);U_((uint32_t)(meshes.size()-6));for(size_t i=6;i<meshes.size();i++){U_((uint32_t)meshes[i].cpu.size());fwrite(meshes[i].cpu.data(),4,meshes[i].cpu.size(),f);}U_((uint32_t)objs.size());
- for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.met);Fl(o.rou);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
-  const float*c=&o.cur.p.x;for(int i=0;i<9;i++)Fl(c[i]);
-  U_((uint32_t)o.k.size());for(auto&k:o.k){Fl(k.t);const float*q=&k.x.p.x;for(int i=0;i<9;i++)Fl(q[i]);}}
- fclose(f);saved(path,fb);}
+ fwrite("MAD2",1,4,f);U_(2);Fl(24);Fl(DUR);U_((uint32_t)(meshes.size()-6));
+ for(size_t i=6;i<meshes.size();i++){Mesh&m=meshes[i];U_((uint32_t)m.cpu.size());fwrite(m.cpu.data(),4,m.cpu.size(),f);Fl(m.rad);U_((uint32_t)m.skin.size());if(!m.skin.empty())fwrite(m.skin.data(),4,m.skin.size(),f);}
+ U_((uint32_t)skins.size());
+ for(auto&sk:skins){U_((uint32_t)sk.j.size());for(size_t k=0;k<sk.j.size();k++){U_((uint32_t)sk.j[k]);fwrite(sk.ibm[k].m,4,16,f);const M fz=k<sk.fz.size()?sk.fz[k]:id();fwrite(fz.m,4,16,f);}}
+ U_((uint32_t)objs.size());
+ for(auto&o:objs){U_((uint32_t)o.mesh);U_((uint32_t)o.parent);U_((uint32_t)o.skin);fwrite(o.nm,1,24,f);Fl(o.len);Fl(o.met);Fl(o.rou);Fl(o.col.x);Fl(o.col.y);Fl(o.col.z);
+  const float*c=&o.cur.p.x;for(int i=0;i<9;i++)Fl(c[i]);U_((uint32_t)o.k.size());for(auto&k:o.k){Fl(k.t);const float*q=&k.x.p.x;for(int i=0;i<9;i++)Fl(q[i]);}}
+ Fl(yaw);Fl(pitch);Fl(cd);Fl(tgt.x);Fl(tgt.y);Fl(tgt.z);Fl(tm);}
+FILE*openOutName(const std::string&nm,const char*ext,std::string&path,bool&fb){fb=false;
+ path=fm("/storage/emulated/0/Download/%s.%s",nm.c_str(),ext);FILE*f=fopen(path.c_str(),"wb");
+ if(!f){path=fm("%s/%s.%s",gDir,nm.c_str(),ext);f=fopen(path.c_str(),"wb");fb=true;}return f;}
+void exportMAD(){std::string path;bool fb;FILE*f=openOut("mad",path,fb);if(!f){toast("Erro ao salvar");return;}writeMAD(f);fclose(f);saved(path,fb);}
+void saveProject(){std::string path;bool fb;FILE*f=openOutName(gProj,"mad",path,fb);if(!f){toast("Erro ao salvar");return;}writeMAD(f);fclose(f);saved(path,fb);}
 std::string b64(const std::vector<unsigned char>&d){static const char*AB="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";std::string o;
  for(size_t i=0;i<d.size();i+=3){unsigned v=d[i]<<16;if(i+1<d.size())v|=d[i+1]<<8;if(i+2<d.size())v|=d[i+2];
   o+=AB[v>>18&63];o+=AB[v>>12&63];o+=i+1<d.size()?AB[v>>6&63]:'=';o+=i+2<d.size()?AB[v&63]:'=';}return o;}
@@ -387,7 +396,7 @@ void exportGLTF(){
  js+="\"accessors\":["+accs+"],\"bufferViews\":["+views+"],\"buffers\":[{\"byteLength\":"+std::to_string(bin.size())+",\"uri\":\"data:application/octet-stream;base64,"+b64(bin)+"\"}]}";
  fwrite(js.data(),1,js.size(),f);fclose(f);saved(path,fb);}
 // ---------- icones, importacao glTF ----------
-float gFlash[32]={};bool gImportOpen=false;std::vector<std::string> gFiles;
+float gFlash[64]={};bool gImportOpen=false;int gPick=0;std::vector<std::string> gFiles;
 void icon2(int id,float cx,float cy,float s,bool on){
  if(id>=3&&id<=6){icon(id,cx,cy,s,on);return;}
  const float c=.93f;
@@ -399,6 +408,9 @@ void icon2(int id,float cx,float cy,float s,bool on){
   if(id==12)rect(cx-s*.9f,cy-s*.12f,s*1.8f,s*.24f,1,.45f,.4f);}
  else if(id==8){if(playing){rect(cx-s*.7f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);rect(cx+s*.15f,cy-s,s*.55f,2*s,c,c,c,1,s*.1f);}
   else for(int i=0;i<8;i++){float h=2*s*(1-i/8.f);rect(cx-s*.7f+i*s*.2f,cy-h/2,s*.22f,h,c,c,c);}}
+ else if(id==40){rect(cx-s*.7f,cy-s,s*1.4f,s*2.f,c,c,c,1,s*.15f);rect(cx-s*.45f,cy-s*.1f,s*.9f,s*.2f,.3f,.3f,.33f);rect(cx-s*.1f,cy-s*.45f,s*.2f,s*.9f,.3f,.3f,.33f);}
+ else if(id==41){rect(cx-s,cy-s*.75f,s*.8f,s*.4f,c,c,c,1,s*.1f);rect(cx-s,cy-s*.4f,s*2.f,s*1.3f,c,c,c,1,s*.12f);}
+ else if(id==42){rect(cx-s*.9f,cy-s*.9f,s*1.8f,s*1.8f,c,c,c,1,s*.15f);rect(cx-s*.55f,cy-s*.9f,s*1.1f,s*.6f,.3f,.3f,.33f,1,s*.06f);rect(cx-s*.5f,cy+s*.2f,s,s*.7f,.3f,.3f,.33f,1,s*.06f);}
  else if(id==9){rect(cx-s*.8f,cy-s,s*1.6f,s*.25f,c,c,c);rect(cx-s*.3f,cy-s*1.2f,s*.6f,s*.25f,c,c,c);rect(cx-s*.65f,cy-s*.65f,s*1.3f,s*1.7f,c,c,c,1,s*.15f);}}
 // ---------- permissao "Acesso a todos os arquivos" (via JNI) ----------
 android_app*gApp=nullptr;
@@ -467,7 +479,7 @@ void scanDir(const std::string&dp,int depth,std::vector<std::pair<time_t,std::st
   if(S_ISDIR(st.st_mode)){if(depth>0&&n.compare(0,7,"import_")!=0)scanDir(pth,depth-1,v);continue;}
   std::string l=n;for(auto&ch:l)ch=(char)tolower((unsigned char)ch);
   auto ends=[&](const char*x){size_t k=strlen(x);return l.size()>k&&l.compare(l.size()-k,k,x)==0;};
-  if(ends(".gltf")||ends(".glb")||ends(".zip"))v.push_back({st.st_mtime,pth});}
+  if(gPick==0?(ends(".gltf")||ends(".glb")||ends(".zip")):ends(".mad"))v.push_back({st.st_mtime,pth});}
  closedir(d);}
 void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;
  scanDir("/storage/emulated/0/Download",1,v);scanDir(gDir,1,v);
@@ -591,6 +603,9 @@ precision highp float;precision highp int;
 layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
 layout(rgba32f,binding=0) writeonly uniform highp image2D uOut;
 uniform highp sampler2D uPrev;
+layout(rgba16f,binding=1) writeonly uniform highp image2D uAovOut;
+uniform highp sampler2D uAovPrev;
+uniform int uN;
 layout(std430,binding=0) readonly buffer NB{vec4 nd[];};
 layout(std430,binding=1) readonly buffer TB{vec4 tr[];};
 uniform ivec2 uSize;uniform int uOffY,uFirst,uFrame,uBounces;
@@ -625,7 +640,7 @@ void main(){
  rs=pcg(uint(px.x)*1973u+uint(px.y)*9277u+uint(uFrame)*26699u+1u);
  vec2 uv=(vec2(px)+vec2(rnd(),rnd()))/vec2(uSize)*2.0-1.0;
  vec3 rd=normalize(uF+uR*(uv.x*uTH.x)+uU*(uv.y*uTH.y));vec3 ro=uCam;
- vec3 Lo=vec3(0.0),T=vec3(1.0);
+ vec3 Lo=vec3(0.0),T=vec3(1.0);vec3 aN=vec3(0.0);float aD=1e4;
  for(int b=0;b<uBounces;b++){
   float th;int ti;vec2 bu;
   if(!hit(ro,rd,false,th,ti,bu)){Lo+=T*sky(rd);break;}
@@ -633,7 +648,7 @@ void main(){
   vec3 N=normalize(n0*(1.0-bu.x-bu.y)+n1*bu.x+n2*bu.y);
   vec4 m1=tr[8*ti+6],m2=tr[8*ti+7];
   vec3 alb=m1.rgb;float met=m1.a,rou=clamp(m2.x,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
-  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;vec3 P=ro+rd*th+N*0.002;
+  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;if(b==0){aN=N;aD=th;}vec3 P=ro+rd*th+N*0.002;
   vec3 TT,BB;basis(uSunD,TT,BB);float cz=1.0-rnd()*(1.0-uSunCos),sz=sqrt(max(1.0-cz*cz,0.0)),ph=2.0*PI*rnd();
   vec3 sd=normalize(TT*(sz*cos(ph))+BB*(sz*sin(ph))+uSunD*cz);float NLs=dot(N,sd);
   if(NLs>0.0){float t2;int i2;vec2 b2;if(!hit(P,sd,true,t2,i2,b2))Lo+=T*brdf(sd,N,V,alb,met,rou,F0)*uSunC*NLs;}
@@ -649,7 +664,28 @@ void main(){
   if(b>=2){float q=clamp(max(T.r,max(T.g,T.b)),0.05,0.95);if(rnd()>q)break;T/=q;}
   ro=P;rd=Ld;}
  vec4 prev=uFirst==1?vec4(0.0):texelFetch(uPrev,px,0);
- imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));}
+ imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));
+ vec4 av=vec4(aN,aD);vec4 pa=uFirst==1?av:texelFetch(uAovPrev,px,0);
+ imageStore(uAovOut,px,vec4(pa.rgb+(av.rgb-pa.rgb)/float(uN),pa.a+(av.a-pa.a)/float(uN)));}
+)MC";
+const char*DNCS=R"MC(#version 310 es
+precision highp float;precision highp int;
+layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
+layout(rgba16f,binding=0) writeonly uniform highp image2D uOut;
+uniform highp sampler2D uSrc;uniform highp sampler2D uAov;
+uniform ivec2 uSize;uniform int uStep,uIter0;uniform float uPhiC;
+vec3 col(ivec2 p){vec4 c=texelFetch(uSrc,p,0);return uIter0==1?(c.a>0.0?c.rgb/c.a:vec3(0.0)):c.rgb;}
+float lum(vec3 c){return dot(c,vec3(0.2126,0.7152,0.0722));}
+void main(){ivec2 p=ivec2(gl_GlobalInvocationID.xy);if(p.x>=uSize.x||p.y>=uSize.y)return;
+ vec4 ap=texelFetch(uAov,p,0);vec3 cp=col(p);float lp=lum(cp);vec3 sum=vec3(0.0);float ws=0.0;
+ for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){
+  ivec2 q=clamp(p+ivec2(i,j)*uStep,ivec2(0),uSize-1);float k=(i==0?2.0:1.0)*(j==0?2.0:1.0);
+  vec4 aq=texelFetch(uAov,q,0);vec3 cq=col(q);
+  float wn=pow(max(dot(ap.xyz,aq.xyz),0.0),24.0);
+  float wd=exp(-abs(ap.w-aq.w)/(0.03*ap.w+0.02*float(uStep)*ap.w+1e-3));
+  float wc=exp(-abs(lp-lum(cq))/uPhiC);
+  float w=(i==0&&j==0)?k:k*wn*wd*wc;sum+=cq*w;ws+=w;}
+ imageStore(uOut,p,vec4(sum/max(ws,1e-6),1.0));}
 )MC";
 const char*MCTM=R"MC(#version 300 es
 precision highp float; in vec2 vUV; uniform sampler2D uAcc; uniform ivec2 uSz; out vec4 o;
@@ -664,6 +700,7 @@ std::vector<TriD> gTD;std::vector<int> gOrd;std::vector<V> gCen;std::vector<BN> 
 bool gMcOK=false,gMcPrev=false,gMcFinal=false,gMcGround=true,gMcHaveCam=false;
 int gMcSpp=64,gMcSamples=0,gMcRow=0,gMcRows=24,gMcW=0,gMcH=0,gMcCur=0,gMcFrame=0;
 GLuint gMcTex[2]={0,0},gMcProg=0,gMcTm=0,gMcNB=0,gMcTB=0,gMcOutF=0,gMcOutT=0;
+GLuint gMcAov[2]={0,0},gMcDnT[2]={0,0},gDnProg=0;bool gMcDn=true,gMcDnOK=false,gDnDirty=false;int gMcDnRes=0;GLint dnSrc,dnAov,dnSz,dnStep,dnI0,dnPhi,mcAovPrev,mcN;
 GLint mcSz,mcOff,mcFirst,mcFr,mcBn,mcCam,mcF,mcR,mcU,mcTH,mcSD,mcSC,mcSCos,mcPrv,tmAcc,tmSz;
 double gSigS=-1,gSigC=-1,gMcLast=0;float gDt=.016f;V gCE,gCF,gCR,gCU;
 double nowSec(){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
@@ -671,7 +708,7 @@ V vmin(V a,V b){return V{std::min(a.x,b.x),std::min(a.y,b.y),std::min(a.z,b.z)};
 V vmax(V a,V b){return V{std::max(a.x,b.x),std::max(a.y,b.y),std::max(a.z,b.z)};}
 V xf(const M&m,V p){return V{m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z+m.m[12],m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z+m.m[13],m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z+m.m[14]};}
 V xn(const M&m,V p){return V{m.m[0]*p.x+m.m[4]*p.y+m.m[8]*p.z,m.m[1]*p.x+m.m[5]*p.y+m.m[9]*p.z,m.m[2]*p.x+m.m[6]*p.y+m.m[10]*p.z};}
-void mcReset(){gMcSamples=0;gMcRow=0;gMcFrame=0;}
+void mcReset(){gMcSamples=0;gMcRow=0;gMcFrame=0;gMcDnOK=false;}
 void gatherTris(){gTD.clear();std::vector<std::vector<M>> JS(skins.size());
  for(size_t s2=0;s2<skins.size();s2++){Skin&sk=skins[s2];JS[s2].resize(sk.j.size());
   for(size_t k=0;k<sk.j.size();k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<sk.fz.size()?sk.fz[k]:id());JS[s2][k]=mul(jw,sk.ibm[k]);}}
@@ -702,7 +739,7 @@ void mcBuild(){gatherTris();int n=(int)gTD.size();gOrd.resize(n);gCen.resize(n);
   for(int k=0;k<3;k++)tr.insert(tr.end(),{t.n[k].x,t.n[k].y,t.n[k].z,0.f});tr.insert(tr.end(),{t.col.x,t.col.y,t.col.z,t.met,t.rou,0.f,0.f,0.f});}
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcNB);glBufferData(GL_SHADER_STORAGE_BUFFER,nd.size()*4,nd.data(),GL_DYNAMIC_DRAW);
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcTB);glBufferData(GL_SHADER_STORAGE_BUFFER,tr.size()*4,tr.data(),GL_DYNAMIC_DRAW);}
-void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
+void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcAov[0]=gMcAov[1]=gMcDnT[0]=gMcDnT[1]=0;gMcDnOK=false;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
  GLint ma=0,mi=0;glGetIntegerv(GL_MAJOR_VERSION,&ma);glGetIntegerv(GL_MINOR_VERSION,&mi);if(ma<3||(ma==3&&mi<1))return;
  GLuint p=glCreateProgram();glAttachShader(p,sh(GL_COMPUTE_SHADER,MCCS));glLinkProgram(p);GLint ok=0;glGetProgramiv(p,GL_LINK_STATUS,&ok);
  if(!ok){char b[512];glGetProgramInfoLog(p,512,0,b);__android_log_print(ANDROID_LOG_ERROR,"NA","MC: %s",b);return;}
@@ -710,12 +747,19 @@ void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gM
  mcBn=glGetUniformLocation(p,"uBounces");mcCam=glGetUniformLocation(p,"uCam");mcF=glGetUniformLocation(p,"uF");mcR=glGetUniformLocation(p,"uR");mcU=glGetUniformLocation(p,"uU");
  mcTH=glGetUniformLocation(p,"uTH");mcSD=glGetUniformLocation(p,"uSunD");mcSC=glGetUniformLocation(p,"uSunC");mcSCos=glGetUniformLocation(p,"uSunCos");mcPrv=glGetUniformLocation(p,"uPrev");
  const char*qv="#version 300 es\nlayout(location=0) in vec3 aP; out vec2 vUV; void main(){vUV=aP.xy;gl_Position=vec4(aP.xy*2.0-1.0,0.0,1.0);}";
- gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");
+ gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");mcAovPrev=glGetUniformLocation(p,"uAovPrev");mcN=glGetUniformLocation(p,"uN");
+ {GLuint dp=glCreateProgram();glAttachShader(dp,sh(GL_COMPUTE_SHADER,DNCS));glLinkProgram(dp);GLint ok2=0;glGetProgramiv(dp,GL_LINK_STATUS,&ok2);
+  if(ok2){gDnProg=dp;dnSrc=glGetUniformLocation(dp,"uSrc");dnAov=glGetUniformLocation(dp,"uAov");dnSz=glGetUniformLocation(dp,"uSize");
+   dnStep=glGetUniformLocation(dp,"uStep");dnI0=glGetUniformLocation(dp,"uIter0");dnPhi=glGetUniformLocation(dp,"uPhiC");}else gDnProg=0;}
  glGenBuffers(1,&gMcNB);glGenBuffers(1,&gMcTB);glUseProgram(gProg);gMcOK=true;}
 void mcResize(int w,int h){
- if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
+ if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(2,gMcAov);glDeleteTextures(2,gMcDnT);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
  glGenTextures(2,gMcTex);
  for(int i=0;i<2;i++){glBindTexture(GL_TEXTURE_2D,gMcTex[i]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA32F,w,h);
+  glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
+ glGenTextures(2,gMcAov);glGenTextures(2,gMcDnT);
+ for(int i=0;i<4;i++){glBindTexture(GL_TEXTURE_2D,i<2?gMcAov[i]:gMcDnT[i-2]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA16F,w,h);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
  glGenTextures(1,&gMcOutT);glBindTexture(GL_TEXTURE_2D,gMcOutT);glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,nullptr);
@@ -741,17 +785,26 @@ void mcStep(){
  glUseProgram(gMcProg);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,gMcNB);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,gMcTB);
  glBindImageTexture(0,gMcTex[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);glUniform1i(mcPrv,0);
+ glBindImageTexture(1,gMcAov[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(mcAovPrev,1);glActiveTexture(GL_TEXTURE0);glUniform1i(mcN,gMcSamples+1);
  glUniform2i(mcSz,gMcW,gMcH);glUniform1i(mcOff,gMcRow);glUniform1i(mcFirst,gMcSamples==0?1:0);glUniform1i(mcFr,gMcFrame);glUniform1i(mcBn,gMcFinal?6:2);
  glUniform3f(mcCam,e.x,e.y,e.z);glUniform3f(mcF,f.x,f.y,f.z);glUniform3f(mcR,r.x,r.y,r.z);glUniform3f(mcU,u.x,u.y,u.z);
  float th=tanf(FOV/2);glUniform2f(mcTH,th*(float)gMcW/gMcH,th);
  V sd=norm(V{.4f,.8f,.5f});glUniform3f(mcSD,sd.x,sd.y,sd.z);glUniform3f(mcSC,3.2f,3.0f,2.8f);glUniform1f(mcSCos,.9995f);
  glDispatchCompute((gMcW+7)/8,(rows+7)/8,1);
  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT|GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);
- gMcRow+=rows;if(gMcRow>=gMcH){gMcCur^=1;gMcSamples++;gMcRow=0;gMcFrame++;}
+ gMcRow+=rows;if(gMcRow>=gMcH){gMcCur^=1;gMcSamples++;gMcRow=0;gMcFrame++;gDnDirty=true;}
  glUseProgram(gProg);}
-void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);
+void mcDenoise(){if(!gMcDn||!gDnProg||!gMcTex[0])return;int iters=gMcFinal?4:3;glUseProgram(gDnProg);
+ glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(dnAov,1);
+ for(int k=0;k<iters;k++){GLuint src=k==0?gMcTex[gMcCur]:gMcDnT[(k-1)&1];
+  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,src);glUniform1i(dnSrc,0);
+  glBindImageTexture(0,gMcDnT[k&1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);
+  glUniform2i(dnSz,gMcW,gMcH);glUniform1i(dnStep,1<<k);glUniform1i(dnI0,k==0?1:0);glUniform1f(dnPhi,.15f+2.f/sqrtf((float)std::max(gMcSamples,1)));
+  glDispatchCompute((gMcW+7)/8,(gMcH+7)/8,1);glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);}
+ gMcDnRes=(iters-1)&1;gMcDnOK=true;glActiveTexture(GL_TEXTURE0);glUseProgram(gProg);}
+void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,(gMcDn&&gMcDnOK)?gMcDnT[gMcDnRes]:gMcTex[gMcCur]);
  glUniform1i(tmAcc,0);glUniform2i(tmSz,gMcW,gMcH);glBindVertexArray(meshes[3].vao);glDrawArrays(GL_TRIANGLES,0,6);glEnable(GL_BLEND);glUseProgram(gProg);}
-void mcFrame(){mcStep();if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
+void mcFrame(){mcStep();if(gDnDirty){if(gMcDn&&mcShow())mcDenoise();gDnDirty=false;}if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
 static void mcWrite(void*c,void*d,int n){fwrite(d,1,n,(FILE*)c);}
 void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  glBindFramebuffer(GL_FRAMEBUFFER,gMcOutF);glViewport(0,0,gMcW,gMcH);mcDraw();
@@ -760,6 +813,47 @@ void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  for(int y=0;y<gMcH/2;y++)for(int x=0;x<gMcW*4;x++)std::swap(px[(size_t)y*gMcW*4+x],px[(size_t)(gMcH-1-y)*gMcW*4+x]);
  std::string path;bool fb;FILE*f=openOut("png",path,fb);if(!f){toast("Erro ao salvar");return;}
  stbi_write_png_to_func(mcWrite,f,gMcW,gMcH,4,px.data(),gMcW*4);fclose(f);saved(path,fb);}
+// ---------- projeto: novo / salvar / abrir / importar .mad ----------
+struct Rd{const unsigned char*p;size_t n,i=0;bool ok=true;
+ uint32_t u(){if(i+4>n){ok=false;return 0;}uint32_t v;memcpy(&v,p+i,4);i+=4;return v;}
+ float f(){uint32_t v=u();float x;memcpy(&x,&v,4);return x;}int s(){return (int)u();}
+ void b(void*d,size_t k){if(i+k>n){ok=false;memset(d,0,k);return;}memcpy(d,p+i,k);i+=k;}};
+void clearScene(){for(size_t i=6;i<meshes.size();i++){glDeleteBuffers(1,&meshes[i].vbo);if(meshes[i].svbo)glDeleteBuffers(1,&meshes[i].svbo);glDeleteVertexArrays(1,&meshes[i].vao);}
+ meshes.resize(6);objs.clear();skins.clear();sel=-1;tm=0;playing=false;parentMode=false;gImportOpen=false;gSigS=-1;mcReset();}
+bool loadMAD(const std::string&path,bool replace){
+ FILE*f=fopen(path.c_str(),"rb");if(!f){toast("Nao consegui abrir o arquivo");return false;}
+ fseek(f,0,SEEK_END);long sz=ftell(f);fseek(f,0,SEEK_SET);if(sz<16){fclose(f);toast("Arquivo invalido");return false;}
+ std::vector<unsigned char> buf(sz);size_t got=fread(buf.data(),1,sz,f);fclose(f);if((long)got!=sz){toast("Falha ao ler");return false;}
+ Rd r{buf.data(),(size_t)sz};char mg[4];r.b(mg,4);uint32_t ver=r.u();
+ if(memcmp(mg,"MAD2",4)!=0||ver!=2){toast("Formato .mad antigo ou invalido (so MAD2)");return false;}
+ r.f();r.f();
+ struct TM{std::vector<float> cpu,skin;float rad=1;};std::vector<TM> tms;uint32_t nm=r.u();if(nm>4096)r.ok=false;
+ for(uint32_t i=0;i<nm&&r.ok;i++){TM t;uint32_t nc=r.u();if((size_t)nc*4>r.n-r.i){r.ok=false;break;}t.cpu.resize(nc);r.b(t.cpu.data(),(size_t)nc*4);t.rad=r.f();
+  uint32_t ns=r.u();if((size_t)ns*4>r.n-r.i){r.ok=false;break;}t.skin.resize(ns);r.b(t.skin.data(),(size_t)ns*4);tms.push_back(std::move(t));}
+ std::vector<Skin> sks;uint32_t nsk=r.u();if(nsk>4096)r.ok=false;
+ for(uint32_t i=0;i<nsk&&r.ok;i++){Skin sk;uint32_t nj=r.u();if(nj>4096||(size_t)nj*136>r.n-r.i){r.ok=false;break;}
+  for(uint32_t k=0;k<nj;k++){sk.j.push_back(r.s());M a,b;r.b(a.m,64);r.b(b.m,64);sk.ibm.push_back(a);sk.fz.push_back(b);}sks.push_back(sk);}
+ std::vector<Obj> os;uint32_t no=r.u();if(no>100000)r.ok=false;
+ for(uint32_t i=0;i<no&&r.ok;i++){Obj o;o.mesh=r.s();o.parent=r.s();o.skin=r.s();r.b(o.nm,24);o.nm[23]=0;o.len=r.f();o.met=r.f();o.rou=r.f();o.col.x=r.f();o.col.y=r.f();o.col.z=r.f();
+  float c[9];r.b(c,36);memcpy(&o.cur.p.x,c,36);uint32_t nk=r.u();if(nk>100000||(size_t)nk*40>r.n-r.i){r.ok=false;break;}
+  for(uint32_t k=0;k<nk;k++){Key kk;kk.t=r.f();float q[9];r.b(q,36);memcpy(&kk.x.p.x,q,36);o.k.push_back(kk);}os.push_back(o);}
+ float cam[7];r.b(cam,28);
+ if(!r.ok){toast("Arquivo .mad corrompido");return false;}
+ if(replace)clearScene();
+ int mb=(int)meshes.size(),sb2=(int)skins.size(),ob=(int)objs.size();
+ for(auto&t:tms){Mesh mm=upload(t.cpu,GL_TRIANGLES);mm.rad=t.rad;if(!t.skin.empty())attachSkin(mm,t.skin);meshes.push_back(mm);}
+ for(auto&sk:sks){for(auto&jj:sk.j)if(jj>=0)jj+=ob;skins.push_back(sk);}
+ for(auto&o:os){if(o.mesh>=6)o.mesh=mb+(o.mesh-6);if(o.mesh<0||o.mesh>=(int)meshes.size())o.mesh=0;if(o.parent>=0)o.parent+=ob;
+  if(o.skin>=0){o.skin+=sb2;if(o.skin>=(int)skins.size())o.skin=-1;}objs.push_back(o);}
+ if(replace){yaw=cam[0];pitch=cam[1];cd=cam[2];tgt=V{cam[3],cam[4],cam[5]};tm=cam[6];}
+ sel=os.empty()?-1:ob;toast(fm("Carregado: %d objetos",(int)os.size()));return true;}
+double gNewT=-10;
+void newProject(){double n=nowSec();if(n-gNewT>3){gNewT=n;toast("Toque em Novo de novo para limpar o projeto");return;}
+ gNewT=-10;clearScene();gProj=fm("projeto_%ld",(long)(time(nullptr)%100000));toast("Novo projeto");}
+void pickPath(const std::string&p){
+ if(gPick==0){importPath(p);return;}
+ if(gPick==1){if(loadMAD(p,true)){size_t sl=p.rfind('/');std::string n=sl==std::string::npos?p:p.substr(sl+1);size_t dt=n.rfind('.');if(dt!=std::string::npos)n=n.substr(0,dt);gProj=n;}}
+ else loadMAD(p,false);}
 bool setJoints(int si){if(si<0||si>=(int)skins.size())return false;Skin&sk=skins[si];int n=std::min((int)sk.j.size(),64);static M J[64];
  for(int k=0;k<n;k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<(int)sk.fz.size()?sk.fz[k]:id());J[k]=mul(jw,sk.ibm[k]);}
  glUniformMatrix4fv(uJL,n,GL_FALSE,J[0].m);return true;}
@@ -767,6 +861,43 @@ void drawBones(){for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];if(o.mesh!=5)
   for(int k=0;k<4;k++){mod.m[k]*=wd;mod.m[4+k]*=o.len;mod.m[8+k]*=wd;}
   float h=(i==sel)?.55f:0;gMR[0]=0;gMR[1]=.5f;gSk=0;
   draw(meshes[5],mul(gVP,mod),mod,o.col.x+(.98f-o.col.x)*h,o.col.y+(.62f-o.col.y)*h,o.col.z+(.15f-o.col.z)*h,1,1);}}
+// ---------- timeline estilo Maya/Houdini ----------
+Rc gFldR[5]={};float gTrX0=0,gTrW=1,gBarY=0,gBarH=0,gDX0=0;int gDV0=0,gDV1=0;
+void tri(float cx,float cy,float s,int dir){const float c=.93f;for(int i=0;i<10;i++){float h=2*s*(1-i/10.f);float x=dir>0?cx-s*.7f+i*s*.14f:cx+s*.7f-(i+1)*s*.14f;rect(x,cy-h/2,s*.15f,h,c,c,c);}}
+void icon3(int id,float cx,float cy,float s,bool on){const float c=.93f;
+ if(id==50){rect(cx-s*1.05f,cy-s*.8f,s*.3f,s*1.6f,c,c,c);tri(cx-s*.05f,cy,s*.7f,-1);tri(cx+s*.65f,cy,s*.7f,-1);}
+ else if(id==54){rect(cx+s*.75f,cy-s*.8f,s*.3f,s*1.6f,c,c,c);tri(cx-s*.65f,cy,s*.7f,1);tri(cx+s*.05f,cy,s*.7f,1);}
+ else if(id==51)tri(cx,cy,s,-1);else if(id==53)tri(cx,cy,s,1);
+ else if(id==52)rect(cx-s*.75f,cy-s*.75f,s*1.5f,s*1.5f,c,c,c,1,s*.15f);
+ else if(id==55){rect(cx-s*.9f,cy-s*.8f,s*.3f,s*1.6f,c,c,c);tri(cx+s*.2f,cy,s*.8f,-1);}
+ else if(id==56){rect(cx+s*.6f,cy-s*.8f,s*.3f,s*1.6f,c,c,c);tri(cx-s*.2f,cy,s*.8f,1);}
+ else if(id==57){for(int i=0;i<10;i++){float w=2*s*(1-i/10.f);rect(cx-w/2,cy-s*.5f+i*s*.1f,w,s*.11f,c,c,c);}}
+ else if(id==7){rect(cx-s*.95f,cy-s*.55f,s*1.1f,s*1.1f,c,c,c,1,s*.55f);rect(cx-s*.6f,cy-s*.2f,s*.4f,s*.4f,.2f,.2f,.22f,1,s*.2f);
+  rect(cx-s*.1f,cy-s*.12f,s*1.2f,s*.24f,c,c,c);rect(cx+s*.65f,cy,s*.22f,s*.55f,c,c,c);rect(cx+s*.35f,cy,s*.22f,s*.4f,c,c,c);}}
+void jumpKey(int dir){if(sel<0||objs[sel].k.empty()){toast("Sem keyframes no objeto selecionado");return;}
+ float best=0;bool f=false;for(auto&k:objs[sel].k){if(dir>0&&k.t>tm+.001f&&(!f||k.t<best)){best=k.t;f=true;}if(dir<0&&k.t<tm-.001f&&(!f||k.t>best)){best=k.t;f=true;}}
+ if(!f){toast(dir>0?"Nao ha proximo keyframe":"Nao ha keyframe anterior");return;}tm=best;applyAnim();}
+void delKey(){if(sel<0)return;auto&k=objs[sel].k;for(size_t i=0;i<k.size();i++)if(fabsf(k[i].t-tm)<.02f){k.erase(k.begin()+i);toast("Keyframe removido");return;}toast("Sem keyframe neste frame");}
+bool tlHit(float x,float y,int&mode){
+ for(int k=0;k<5;k++)if(inR(gFldR[k],x,y)){mode=k==4?27:23+k;gDX0=x;gDV0=k==0?gFS:k==1?gVS:k==2?gVE:k==3?gFE:(int)roundf(tm*24);return true;}
+ float u=U();
+ if(y>=gBarY-.6f*u&&y<=gBarY+gBarH+.6f*u&&x>=gTrX0-2*u&&x<=gTrX0+gTrW+2*u){
+  float rng=(float)std::max(gFE-gFS,1);float b0=gTrX0+(gVS-gFS)/rng*gTrW,b1=gTrX0+(gVE-gFS)/rng*gTrW;gDX0=x;gDV0=gVS;gDV1=gVE;
+  if(fabsf(x-b0)<2.2f*u)mode=20;else if(fabsf(x-b1)<2.2f*u)mode=21;
+  else{if(x<b0||x>b1){int c=(int)roundf(gFS+(x-gTrX0)/gTrW*rng),w=gVE-gVS;int ns=std::clamp(c-w/2,gFS,std::max(gFE-w,gFS));gVS=ns;gVE=ns+w;gDV0=gVS;gDV1=gVE;}mode=22;}
+  return true;}
+ return false;}
+void tlDrag(int mode,float x){float rng=(float)std::max(gFE-gFS,1);float u=U();int df=(int)roundf((x-gDX0)/(.55f*u));
+ if(mode==20)gVS=std::clamp((int)roundf(gFS+(x-gTrX0)/gTrW*rng),gFS,gVE-5);
+ else if(mode==21)gVE=std::clamp((int)roundf(gFS+(x-gTrX0)/gTrW*rng),gVS+5,gFE);
+ else if(mode==22){int w=gDV1-gDV0;int sh=(int)roundf((x-gDX0)/gTrW*rng);int ns=std::clamp(gDV0+sh,gFS,std::max(gFE-w,gFS));gVS=ns;gVE=ns+w;}
+ else if(mode==23){gFS=std::clamp(gDV0+df,0,gFE-10);syncRange();}
+ else if(mode==24)gVS=std::clamp(gDV0+df,gFS,gVE-5);
+ else if(mode==25)gVE=std::clamp(gDV0+df,gVS+5,gFE);
+ else if(mode==26){gFE=std::clamp(gDV0+df,gFS+10,2400);syncRange();}
+ else if(mode==27){int f=std::clamp(gDV0+df,gFS,gFE);tm=f/24.f;applyAnim();}
+ if(mode>=23&&mode<=26){float a=gFS/24.f,b=gFE/24.f;if(tm<a)tm=a;if(tm>b)tm=b;applyAnim();}}
+void frameTap(float x){float rel=(x-gFldR[4].x)/std::max(gFldR[4].w,1.f);int f=(int)roundf(tm*24);if(rel<.33f)f--;else if(rel>.66f)f++;tm=std::clamp(f,gFS,gFE)/24.f;applyAnim();}
 void frame(){
  bool post=gSSAO&&gPostOK;glBindFramebuffer(GL_FRAMEBUFFER,post?(gMsOK?gMsFbo:gFbo):0);
  glViewport(0,0,W,H);glClearColor(.24f,.24f,.26f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -789,9 +920,15 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;char hb[48];snprintf(hb,48,"Nomad Animator v13   %d FPS",(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
- {const char*rl[3]={"Import glTF","Export glTF","Export MAD"};const int rid[3]={15,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f,x=W-ML_;
-  for(int i=2;i>=0;i--){float w=tw(rl[i],ps)+4*u;x-=w;pill(x,py,w,ph,rid[i],rl[i],gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen),i==0?.2f:.33f,i==0?.38f:.33f,i==0?.55f:.35f);x-=.8f*u;}}
+  float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v16  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+ {float bs=5.8f*u,gp=.45f*u,by=(hH-bs)/2,xr=W-ML_;
+  static const int PJ[3]={42,41,40};
+  for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);float x=xr-bs;
+   rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});xr=x-gp;}
+  xr-=.8f*u;
+  const char*rl[4]={"Import glTF","Import MAD","Export glTF","Export MAD"};const int rid[4]={15,43,14,13};float ph=5*u,py=(hH-ph)/2,ps=ph*.072f;
+  for(int i=3;i>=0;i--){float w=tw(rl[i],ps)+4*u,x=xr-w;bool on=gFlash[rid[i]]>0||(rid[i]==15&&gImportOpen&&gPick==0)||(rid[i]==43&&gImportOpen&&gPick==2);
+   pill(x,py,w,ph,rid[i],rl[i],on,i<2?.2f:.33f,i<2?.38f:.33f,i<2?.55f:.35f);xr=x-.8f*u;}}
  { // painel de render (esquerda)
   float px=ML_,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u;panel(px,py,pw2,rh*5+2.4f*u,1*u);
   auto sld=[&](int i,float yy,const char*lab,float v){float lw=9.5f*u,sx=px+lw,sw=pw2-lw-1.4f*u;text(lab,px+1.2f*u,yy+rh/2-2.5f*tp2,tp2,.85f,.85f,.88f);
@@ -804,16 +941,17 @@ void frame(){
   gBtn.push_back({{px,py,pw2,rh*5+2.4f*u},299});}
  { // painel Monte Carlo / path tracing
   float px=ML_,py=hH+1.5f*u+(5*4.4f+2.4f)*u+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,y1=py+1.0f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u;
-  panel(px,py,pw2,rh*6+1.6f*u,1*u);
+  panel(px,py,pw2,rh*7+1.6f*u,1*u);
   if(!gMcOK){text("MC indisponivel (precisa de ES 3.1)",px+1.2f*u,y1+rh/2-2.5f*tp2,tp2*.85f,.85f,.55f,.5f);}
   else{bool done=gMcFinal&&gMcSamples>=gMcSpp;
    pill(px+1.2f*u,y1,bw_,bh_,30,gMcPrev?"Preview MC: on":"Preview MC: off",gMcPrev,.3f,.3f,.33f);
    pill(px+1.2f*u,y1+rh,bw_,bh_,31,gMcFinal?(done?"Fechar render":"Parar render"):"Render final",gMcFinal,.5f,.34f,.12f);
    pill(px+1.2f*u,y1+2*rh,bw_,bh_,33,fm("Amostras: %d",gMcSpp).c_str(),false,.3f,.3f,.33f);
    pill(px+1.2f*u,y1+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
-   pill(px+1.2f*u,y1+4*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
-   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y1+5*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
-  gBtn.push_back({{px,py,pw2,rh*6+1.6f*u},299});}
+   pill(px+1.2f*u,y1+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
+   pill(px+1.2f*u,y1+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
+   char sb[64];snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y1+6*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
+  gBtn.push_back({{px,py,pw2,rh*7+1.6f*u},299});}
  // outliner + transform (direita)
  float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
  int n=(int)objs.size(),rows=std::min(n,3),st=(n>3&&sel>=0)?std::clamp(sel-2,0,n-3):0;
@@ -832,33 +970,45 @@ void frame(){
   for(int k=0;k<3;k++){float yy=ty+4*u+k*rh;text(LB3[k],rx+1.2f*u,yy+2.2f*u-2.5f*tpx,tpx,.75f,.75f,.78f);
    for(int j=0;j<3;j++){char b[16];snprintf(b,16,k==1?"%.1f":"%.2f",(&val[k].x)[j]);float fx=rx+lw+j*fw;
     rect(fx,yy+.3f*u,fw-.5f*u,rh-.6f*u,.25f,.25f,.27f,1,.6f*u);tcen(b,fx+(fw-.5f*u)/2,yy+2.2f*u,tpx*.95f,.92f,.92f,.92f);}}}
- // timeline (estilo Blender)
- float TH=27*u,tT=100*u-3.6f*u-TH,tw_=W-2*ML_;panel(ML_,tT,tw_,TH,1*u);
- {float sy=tT+.7f*u,sh_=5.2f*u,x=ML_+.8f*u,pp=sh_*.072f;static const char*SL[4]={"|<","<",">",">|"};
-  for(int i=0;i<4;i++){pill(x,sy,5.6f*u,sh_,20+i,SL[i],gFlash[20+i]>0,.3f,.3f,.33f);x+=6.1f*u;}
-  char b[24];snprintf(b,24,"Frame %d / %d",(int)roundf(tm*24),(int)(DUR*24));
-  rect(x+.6f*u,sy,19*u,sh_,.09f,.09f,.1f,1,.7f*u);tcen(b,x+.6f*u+9.5f*u,sy+sh_/2,pp,.9f,.9f,.92f);
-  float kw=tw("Key",pp)+10*u,kx=ML_+tw_-kw-.8f*u;pill(kx,sy,kw,sh_,7,"Key",gFlash[7]>0,.62f,.5f,.1f);dia(kx+3.2f*u,sy+sh_/2,2.4f*u,1,.9f,.5f);}
- float nameW=19*u,tx0=ML_+nameW,twd=tw_-nameW-.8f*u,ry0=tT+6.6f*u,rulH_=3.6f*u,rowH=(TH-6.6f*u-rulH_-.7f*u)/4;
- gTX0=tx0+.8f*u;gTW=twd-1.6f*u;gTrack={tx0,ry0,twd,rulH_+4*rowH};gBlock.push_back(gTrack);
- rect(tx0,ry0,twd,rulH_,.17f,.17f,.19f,1,.6f*u);
- for(int f=0;f<=(int)(DUR*24);f+=6){float xx=tx(f/24.f);bool big=f%24==0;
-  rect(xx-.1f*u,ry0+(big?1.9f:2.5f)*u,.2f*u,(big?1.5f:.9f)*u,.55f,.55f,.6f);
-  if(big){char b[8];snprintf(b,8,"%d",f);tcen(b,xx,ry0+1.0f*u,.3f*u,.7f,.7f,.75f);}}
- int rowsI[4],nr=0;if(sel>=0)rowsI[nr++]=sel;for(int i=0;i<(int)objs.size()&&nr<4;i++)if(i!=sel&&!objs[i].k.empty())rowsI[nr++]=i;
- for(int r=0;r<4;r++){float yy=ry0+rulH_+r*rowH;bool has=r<nr;int oi=has?rowsI[r]:-1;bool hs=has&&oi==sel;
-  rect(tx0,yy,twd,rowH-.2f*u,hs?.15f:.11f,hs?.2f:.11f,hs?.3f:.125f,1,.4f*u);
-  rect(ML_+.8f*u,yy,nameW-1.2f*u,rowH-.2f*u,.17f,.17f,.19f,1,.4f*u);
-  if(has){Obj&o=objs[oi];char nb[16];snprintf(nb,16,"%.12s",o.nm);
-   rect(ML_+1.4f*u,yy+rowH/2-.7f*u,1.4f*u,1.4f*u,o.col.x,o.col.y,o.col.z,1,.7f*u);text(nb,ML_+3.4f*u,yy+rowH/2-2.5f*tpx,tpx,.92f,.92f,.92f);
-   gBtn.push_back({{ML_,yy,nameW,rowH},100+oi});
-   for(auto&k:o.k){bool cur=fabsf(k.t-tm)<.02f;dia(tx(k.t),yy+rowH/2,rowH*.62f,cur?1.f:.98f,cur?.92f:.74f,cur?.65f:.18f);}}}
- if(nr==0)tcen("Selecione um objeto para ver os keyframes",tx0+twd/2,ry0+rulH_+2*rowH,.36f*u,.5f,.5f,.55f);
- {float px=tx(tm);rect(px-.17f*u,ry0,.34f*u,rulH_+4*rowH,.28f,.45f,.7f);rect(px-2.4f*u,ry0,4.8f*u,rulH_*.9f,.28f,.45f,.7f,1,.8f*u);
-  char b[8];snprintf(b,8,"%d",(int)roundf(tm*24));tcen(b,px,ry0+rulH_*.45f,.34f*u,1,1,1);}
+ // timeline estilo Maya/Houdini (compacta)
+ float TH=17.5f*u,tT=100*u-3.6f*u-TH,tw_=W-2*ML_;panel(ML_,tT,tw_,TH,1*u);
+ {float x0=ML_+.9f*u,wd=tw_-1.8f*u;
+  { // linha 1: transporte, frame atual, keys
+   float y=tT+.8f*u,h=5.4f*u,bwt=5.6f*u,gp=.3f*u,x=x0;static const int TID[5]={50,51,52,53,54};
+   for(int k=0;k<5;k++){bool on=(k==2&&!playing)||(k==1&&playing&&gPlayDir<0)||(k==3&&playing&&gPlayDir>0)||gFlash[TID[k]]>0;
+    rect(x,y,bwt,h,on?.28f:.27f,on?.45f:.27f,on?.7f:.29f,1,.7f*u);icon3(TID[k],x+bwt/2,y+h/2,h*.26f,on);gBtn.push_back({{x,y,bwt,h},TID[k]});x+=bwt+gp;}
+   x+=1.0f*u;float fw=11*u;rect(x,y,fw,h,.09f,.09f,.1f,1,.7f*u);gFldR[4]={x,y,fw,h};
+   char fb_[16];snprintf(fb_,16,"%d",(int)roundf(tm*24));tcen(fb_,x+fw/2,y+h/2,.46f*u,.95f,.95f,.95f);
+   tcen("<",x+1.3f*u,y+h/2,.36f*u,.5f,.5f,.55f);tcen(">",x+fw-1.3f*u,y+h/2,.36f*u,.5f,.5f,.55f);x+=fw+gp+.6f*u;
+   for(int k=0;k<2;k++){int id=55+k;float bw2=4.4f*u;rect(x,y,bw2,h,.27f,.27f,.29f,1,.7f*u);icon3(id,x+bw2/2,y+h/2,h*.2f,false);gBtn.push_back({{x,y,bw2,h},id});x+=bw2+gp;}
+   x+=1.2f*u;bool kon=gFlash[7]>0;rect(x,y,h,h,kon?.28f:.2f,kon?.45f:.2f,kon?.7f:.22f,1,h/2);icon3(7,x+h/2,y+h/2,h*.28f,false);gBtn.push_back({{x,y,h,h},7});x+=h+.3f*u;
+   float dw=3.2f*u;rect(x,y,dw,h,.22f,.22f,.24f,1,.7f*u);icon3(57,x+dw/2,y+h/2,h*.14f,false);gBtn.push_back({{x,y,dw,h},57});}
+  { // linha 2: regua
+   float ry=tT+7.0f*u,rh=6.0f*u,ppf;gTX0=x0+.6f*u;gTW=wd-1.2f*u;gTrack={x0,ry,wd,rh};gBlock.push_back(gTrack);
+   rect(x0,ry,wd,rh,.12f,.12f,.13f,1,.6f*u);ppf=gTW/(float)std::max(gVE-gVS,1);float yl=ry+4.3f*u;
+   if(sel>=0)for(auto&k:objs[sel].k){float kx=tx(k.t);if(kx<gTX0-1||kx>gTX0+gTW+1)continue;float bw3=std::clamp(ppf*.85f,.5f*u,1.8f*u);rect(kx-bw3/2,yl-1.9f*u,bw3,3.8f*u,.3f,.62f,.08f);}
+   rect(x0+.3f*u,yl-.05f*u,wd-.6f*u,.1f*u,.6f,.6f,.63f);
+   static const int ST[8]={1,2,5,10,20,25,50,100};int step=100;for(int k=0;k<8;k++)if(ST[k]*ppf>=9*u){step=ST[k];break;}
+   int minor=step>=10?step/5:(step>=5?1:0);
+   for(int f=gVS;f<=gVE;f++){float xx=tx(f/24.f);bool major=f%step==0;
+    if(major){rect(xx-.08f*u,yl-1.8f*u,.16f*u,3.6f*u,.78f,.78f,.8f);char b[12];snprintf(b,12,"%d",f);tcen(b,xx,ry+1.3f*u,.32f*u,.6f,.6f,.64f);}
+    else if(minor>0&&f%minor==0)rect(xx-.06f*u,yl-.9f*u,.12f*u,1.8f*u,.5f,.5f,.54f);}
+   float cf=tm*24;if(cf>=gVS-.01f&&cf<=gVE+.01f){float px=tx(tm);char b[12];snprintf(b,12,"%d",(int)roundf(cf));float bw3=tw(b,.4f*u)+3.2f*u;
+    rect(px-.06f*u,ry+3.6f*u,.12f*u,rh-3.6f*u,1,1,1);rect(px-bw3/2-.15f*u,ry+.1f*u,bw3+.3f*u,3.5f*u,.95f,.95f,.95f,1,.6f*u);
+    rect(px-bw3/2,ry+.25f*u,bw3,3.2f*u,.05f,.05f,.06f,1,.5f*u);tcen(b,px,ry+1.85f*u,.4f*u,1,1,1);dia(px,ry+3.6f*u,1.4f*u,.95f,.95f,.95f);}}
+  { // linha 3: intervalo global e janela visivel
+   float ry3=tT+13.6f*u,h3=3.4f*u,fw3=8.2f*u;
+   gFldR[0]={x0,ry3,fw3,h3};gFldR[1]={x0+fw3+.6f*u,ry3,fw3,h3};gFldR[2]={x0+wd-2*fw3-.6f*u,ry3,fw3,h3};gFldR[3]={x0+wd-fw3,ry3,fw3,h3};
+   int vals[4]={gFS,gVS,gVE,gFE};
+   for(int k=0;k<4;k++){bool inn=k==1||k==2;rect(gFldR[k].x,ry3,fw3,h3,inn?.07f:.16f,inn?.07f:.16f,inn?.08f:.18f,1,.5f*u);
+    char b[12];snprintf(b,12,"%d",vals[k]);tcen(b,gFldR[k].x+fw3/2,ry3+h3/2,.4f*u,.92f,.92f,.92f);}
+   gTrX0=gFldR[1].x+fw3+1.2f*u;gTrW=gFldR[2].x-1.2f*u-gTrX0;gBarY=ry3;gBarH=h3;
+   float rng=(float)std::max(gFE-gFS,1),b0=gTrX0+(gVS-gFS)/rng*gTrW,b1=gTrX0+(gVE-gFS)/rng*gTrW,cy=ry3+h3/2;
+   rect(gTrX0,cy-.2f*u,gTrW,.4f*u,.07f,.07f,.08f,1,.2f*u);rect(b0,cy-.35f*u,std::max(b1-b0,.5f*u),.7f*u,.55f,.55f,.58f,1,.3f*u);
+   rect(b0-.5f*u,ry3+.3f*u,1.0f*u,h3-.6f*u,.75f,.75f,.78f,1,.3f*u);rect(b1-.5f*u,ry3+.3f*u,1.0f*u,h3-.6f*u,.75f,.75f,.78f,1,.3f*u);}}
  if(gImportOpen){float pw2=82*u,rh2=4.8f*u,tp2=.42f*u;int n=std::max((int)gFiles.size(),1);float ph2=6.5f*u+n*rh2+1.5f*u,px2=(W-pw2)/2,py2=(H-ph2)/2;
-  panel(px2,py2,pw2,ph2,1.2f*u);text("Importar glTF / GLB / ZIP",px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
-  if(gFiles.empty()){text("Nenhum .gltf/.glb/.zip em Download.",px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
+  panel(px2,py2,pw2,ph2,1.2f*u);text((gPick==0?"Importar glTF / GLB / ZIP":gPick==1?"Abrir projeto (.mad)":"Importar .mad"),px2+2*u,py2+2.6f*u-2.5f*tp2,tp2,.7f,.7f,.75f);
+  if(gFiles.empty()){text((gPick==0?"Nenhum .gltf/.glb/.zip em Download.":"Nenhum .mad em Download."),px2+2*u,py2+8.1f*u-2.5f*tp2,tp2,.9f,.9f,.9f);
    text("Ative Acesso a todos os arquivos nas permissoes do app.",px2+2*u,py2+8.1f*u+rh2-2.5f*tp2,tp2*.9f,.6f,.6f,.65f);}
   for(size_t i=0;i<gFiles.size();i++){float yy=py2+6.5f*u+i*rh2;rect(px2+1*u,yy,pw2-2*u,rh2-.4f*u,.24f,.24f,.27f,1,.7f*u);
    std::string nf=gFiles[i];size_t s1=nf.rfind('/');if(s1!=std::string::npos&&s1>0){size_t s2=nf.rfind('/',s1-1);nf=nf.substr(s2==std::string::npos?0:s2+1);}if(nf.size()>38)nf=nf.substr(nf.size()-38);
@@ -870,16 +1020,19 @@ void frame(){
 
 // ---------- input ----------
 void press(int i){
- if(i>=0&&i<32)gFlash[i]=.35f;
- if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())importPath(gFiles[k]);}return;}
+ if(i>=0&&i<64)gFlash[i]=.35f;
+ if(i>=200){int k=i-200;if(i!=299){gImportOpen=false;if(k<(int)gFiles.size())pickPath(gFiles[k]);}return;}
  if(i<3)addObj(i);else if(i<7)tool=i-3;
- else if(i==7)insertKey();else if(i==8)playing=!playing;
+ else if(i==7)insertKey();else if(i==8){playing=!playing;if(playing)gPlayDir=1;}
  else if(i==9){if(sel>=0)delObj(sel);}
  else if(i==10)addObj(5);
  else if(i==11){if(sel<0)toast("Selecione um objeto");else{parentMode=true;toast("Toque no objeto PAI");}}
  else if(i==12){if(sel>=0)clearParent(sel);}
  else if(i==13||i==14){if(!filesGranted())needFiles();else if(i==13)exportMAD();else exportGLTF();}
- else if(i==15){if(!filesGranted())needFiles();else{scanFiles();gImportOpen=true;}}
+ else if(i==15||i==41||i==43){if(!filesGranted())needFiles();else{gPick=i==15?0:i==41?1:2;scanFiles();gImportOpen=true;}}
+ else if(i==40)newProject();
+ else if(i==42){if(!filesGranted())needFiles();else saveProject();}
+ else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
  else if(i==16)gSSAO=!gSSAO;
  else if(i==17)gBones=!gBones;
  else if(i==30){gMcPrev=!gMcPrev;if(gMcPrev)gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();}
@@ -887,8 +1040,10 @@ void press(int i){
  else if(i==32){if(!filesGranted())needFiles();else mcSave();}
  else if(i==33)gMcSpp=gMcSpp>=1024?16:gMcSpp*4;
  else if(i==34){gMcGround=!gMcGround;gSigS=-1;}
+ else if(i==50){tm=gFS/24.f;applyAnim();}else if(i==51){playing=true;gPlayDir=-1;}else if(i==52)playing=false;else if(i==53){playing=true;gPlayDir=1;}else if(i==54){tm=gFE/24.f;applyAnim();}
+ else if(i==55)jumpKey(-1);else if(i==56)jumpKey(1);else if(i==57)delKey();
  else if(i>=20&&i<=23){if(i==20)tm=0;else if(i==21)tm=std::max(0.f,tm-1/24.f);else if(i==22)tm=std::min(DUR,tm+1/24.f);else tm=DUR;applyAnim();}}
-void scrub(float x){tm=roundf(std::clamp((x-gTX0)/gTW,0.f,1.f)*DUR*24)/24;applyAnim();}
+void scrub(float x){int f=(int)roundf(gVS+std::clamp((x-gTX0)/gTW,0.f,1.f)*(gVE-gVS));tm=std::clamp(f,gFS,gFE)/24.f;applyAnim();}
 void pick(float x,float y){
  if(gBones){int bb=-1;float bd=40;for(int i=0;i<(int)objs.size();i++){if(objs[i].mesh!=5)continue;M w=worldM(i);
    V hd{w.m[12],w.m[13],w.m[14]},tl=hd+V{w.m[4],w.m[5],w.m[6]}*objs[i].len;float hx,hy,qx,qy;if(!prj(hd,hx,hy)||!prj(tl,qx,qy))continue;
@@ -926,7 +1081,8 @@ int32_t onInput(android_app*,AInputEvent*e){
   for(auto&b:gBtn)if(inR(b.r,x,y)){if(b.id>=300&&b.id<=302){setSlider(b.id-300,x);mode=6+b.id-300;break;}if(b.id>=200||b.id<100)press(b.id);else{if(parentMode)finishParent(b.id-100);else sel=b.id-100;}mode=2;break;}
   if(mode<0&&gImportOpen){gImportOpen=false;mode=2;}
   if(mode<0){
-   if(inR(gTrack,x,y)){mode=3;scrub(x);}
+   if(tlHit(x,y,mode)){}
+   else if(inR(gTrack,x,y)){mode=3;scrub(x);}
    else if(hypotf(x-navX(),y-navY())<navR()+12)mode=4;
    else{bool blk=false;for(auto&r:gBlock)if(inR(r,x,y))blk=true;
     if(blk)mode=2;else{int a=hitGizmo(x,y);if(a>=0){gAxis=a;gDrag=true;mode=5;}else mode=1;}}}
@@ -934,6 +1090,7 @@ int32_t onInput(android_app*,AInputEvent*e){
  else if(act==AMOTION_EVENT_ACTION_POINTER_UP){rl=true;pinch=0;}
  else if(act==AMOTION_EVENT_ACTION_MOVE){
   if(mode==3)scrub(x);
+  else if(mode>=20){if(hypotf(x-sx,y-sy)>20)moved=true;tlDrag(mode,x);}
   else if(mode>=6)setSlider(mode-6,x);
   else if(mode==1&&n>=2){float d=hypotf(AMotionEvent_getX(e,1)-x,AMotionEvent_getY(e,1)-y);
    if(pinch>0&&d>1)cd=std::clamp(cd*pinch/d,2.f,40.f);pinch=d;moved=true;}
@@ -942,7 +1099,7 @@ int32_t onInput(android_app*,AInputEvent*e){
    else{float dx=x-lx,dy=y-ly;lx=x;ly=y;if(hypotf(x-sx,y-sy)>20)moved=true;
     if(mode==5)gdrag(dx,dy);else if(moved)orbit(dx,dy);}}
  }else if(act==AMOTION_EVENT_ACTION_UP||act==AMOTION_EVENT_ACTION_CANCEL){
-  if(mode==1&&!moved)pick(x,y);if(mode==4&&!moved)snap(x,y);mode=0;gDrag=false;}
+  if(mode==1&&!moved)pick(x,y);if(mode==4&&!moved)snap(x,y);if(mode==27&&!moved)frameTap(x);mode=0;gDrag=false;}
  return 1;}
 void onCmd(android_app*a,int32_t c){
  if(c==APP_CMD_INIT_WINDOW&&a->window){if(initEGL(a->window)){initGL();ready=true;}}
@@ -950,7 +1107,7 @@ void onCmd(android_app*a,int32_t c){
 
 void android_main(android_app*app){
  app->onAppCmd=onCmd;app->onInputEvent=onInput;
- gApp=app;if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
+ gProj=fm("projeto_%ld",(long)(time(nullptr)%100000));gApp=app;if(app->activity)gDir=app->activity->externalDataPath?app->activity->externalDataPath:app->activity->internalDataPath;
  auto now=[](){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;};
  double last=now();
  while(true){
@@ -959,5 +1116,5 @@ void android_main(android_app*app){
    if(src)src->process(app,src);
    if(app->destroyRequested){termEGL();return;}}
   if(ready){double t=now();float dt=(float)(t-last);last=t;gDt=dt;gToastT-=dt;gFAcc+=dt;gFN++;if(gFAcc>=.5f){gFps=gFN/gFAcc;gFAcc=0;gFN=0;}for(float&fl:gFlash)if(fl>0)fl-=dt;
-   if(playing){tm+=dt;if(tm>DUR)tm=0;applyAnim();}
+   if(playing){tm+=dt*gPlayDir;float a_=gFS/24.f,b_=gFE/24.f;if(tm>b_)tm=a_;if(tm<a_)tm=b_;applyAnim();}
    frame();}else last=now();}}
