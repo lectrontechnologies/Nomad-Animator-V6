@@ -18,6 +18,8 @@
 #include "stb_truetype.h"
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 #include <sys/stat.h>
@@ -54,7 +56,7 @@ M model(const T&t){
 
 // ---------- cena + animacao ----------
 struct Key{float t;T x;};
-struct Obj{int mesh;V col;T cur;std::vector<Key> k;char nm[24]="";int parent=-1;float len=1;float met=0,rou=.5f;int skin=-1;};
+struct Obj{int mesh;V col;T cur;std::vector<Key> k;char nm[24]="";int parent=-1;float len=1;float met=0,rou=.5f;int skin=-1;int tb=-1,tm=-1,tn=-1;float ac=0;};
 std::vector<Obj> objs;
 int sel=-1,tool=3,W=1,H=1;      // tool: 0 mover,1 girar,2 escalar,3 camera
 bool playing=false;float tm=1/24.f;float DUR=10;int gFS=1,gFE=240,gVS=1,gVE=120,gPlayDir=1;
@@ -113,12 +115,12 @@ void delObj(int i){
 
 // ---------- GL ----------
 const char*VS=R"(#version 300 es
-layout(location=0) in vec3 aP; layout(location=1) in vec3 aN; layout(location=2) in vec4 aJ; layout(location=3) in vec4 aW;
-uniform mat4 uMVP; uniform mat4 uM; uniform mat4 uJ[64]; uniform float uSk; out vec3 vN; out vec3 vP; out vec3 vW;
+layout(location=0) in vec3 aP; layout(location=1) in vec3 aN; layout(location=2) in vec4 aJ; layout(location=3) in vec4 aW; layout(location=4) in vec2 aUV;
+uniform mat4 uMVP; uniform mat4 uM; uniform mat4 uJ[64]; uniform float uSk; out vec3 vN; out vec3 vP; out vec3 vW; out vec2 vUV;
 void main(){vec4 p=vec4(aP,1.0);vec3 n=aN;if(uSk>0.5){mat4 S=aW.x*uJ[int(aJ.x)]+aW.y*uJ[int(aJ.y)]+aW.z*uJ[int(aJ.z)]+aW.w*uJ[int(aJ.w)];p=S*p;n=mat3(S)*n;}
- gl_Position=uMVP*p; vN=mat3(uM)*n; vP=aP; vW=(uM*p).xyz;})";
+ gl_Position=uMVP*p; vN=mat3(uM)*n; vP=aP; vW=(uM*p).xyz; vUV=aUV;})";
 const char*FS=R"(#version 300 es
-precision highp float; in vec3 vN; in vec3 vP; in vec3 vW; uniform vec4 uC; uniform float uL; uniform vec3 uS; uniform vec3 uCam; uniform vec2 uMR; out vec4 o;
+precision highp float; in vec3 vN; in vec3 vP; in vec3 vW; in vec2 vUV; uniform highp sampler2DArray uTex; uniform vec4 uTL; uniform vec4 uC; uniform float uL; uniform vec3 uS; uniform vec3 uCam; uniform vec2 uMR; out vec4 o;
 vec3 shade(vec3 L,vec3 Lc,vec3 N,vec3 V,vec3 alb,vec3 F0,float met,float rou){
  vec3 H=normalize(L+V);float a=rou*rou,a2=a*a;float NL=max(dot(N,L),0.0),NV=max(dot(N,V),1e-3),NH=max(dot(N,H),0.0),VH=max(dot(V,H),0.0);
  float dd=NH*NH*(a2-1.0)+1.0;float D=a2/(3.14159*dd*dd+1e-6);float k=(rou+1.0)*(rou+1.0)/8.0;
@@ -126,15 +128,20 @@ vec3 shade(vec3 L,vec3 Lc,vec3 N,vec3 V,vec3 alb,vec3 F0,float met,float rou){
  vec3 spec=D*G*F/(4.0*NV*max(NL,1e-3));vec3 kd=(1.0-F)*(1.0-met);
  return (kd*alb/3.14159+spec)*Lc*NL;}
 vec3 pbr(){vec3 N=normalize(vN),V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;
- vec3 alb=pow(uC.rgb,vec3(2.2));float met=uMR.x,rou=clamp(uMR.y,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
+ vec3 base=uC.rgb;float met=uMR.x,rou=uMR.y;
+ if(uTL.x>=0.0)base*=texture(uTex,vec3(vUV,uTL.x)).rgb;
+ if(uTL.y>=0.0){vec4 mrs=texture(uTex,vec3(vUV,uTL.y));rou*=mrs.g;met*=mrs.b;}
+ if(uTL.z>=0.0){vec3 tn=texture(uTex,vec3(vUV,uTL.z)).xyz*2.0-1.0;vec3 dp1=dFdx(vW),dp2=dFdy(vW);vec2 du1=dFdx(vUV),du2=dFdy(vUV);
+  vec3 dp2p=cross(dp2,N),dp1p=cross(N,dp1);vec3 Tt=dp2p*du1.x+dp1p*du2.x,Bt=-(dp2p*du1.y+dp1p*du2.y);float iv=inversesqrt(max(dot(Tt,Tt),dot(Bt,Bt))+1e-20);N=normalize(mat3(Tt*iv,Bt*iv,N)*tn);}
+ vec3 alb=pow(base,vec3(2.2));rou=clamp(rou,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
  vec3 col=shade(normalize(vec3(.4,.8,.5)),vec3(3.2,3.0,2.8),N,V,alb,F0,met,rou)+shade(normalize(vec3(-.6,.3,-.4)),vec3(.6,.7,1.0),N,V,alb,F0,met,rou);
  vec3 amb=mix(vec3(.12,.11,.10),vec3(.22,.26,.34),N.y*.5+.5);float NV=max(dot(N,V),0.0);
  vec3 Fa=F0+(max(vec3(1.0-rou),F0)-F0)*pow(1.0-NV,5.0);
  col+=amb*(alb*(1.0-met)+Fa*0.6);
  col=col*(2.51*col+0.03)/(col*(2.43*col+0.59)+0.14);return pow(clamp(col,0.0,1.0),vec3(1.0/2.2));}
-void main(){if(uL<-1.5){vec2 q=(vP.xy-.5)*uS.xy;float dd=(abs(q.x)+abs(q.y)-uS.x*.5)*.7071;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL<0.0){vec2 q=(vP.xy-.5)*uS.xy;vec2 e=abs(q)-uS.xy*.5+uS.z;float dd=length(max(e,0.0))+min(max(e.x,e.y),0.0)-uS.z;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL>0.5){o=vec4(pbr(),uC.a);return;} o=vec4(uC.rgb,uC.a);})";
-GLuint uMVP,uM,uC,uL,uS,uCamL,uMRL,uJL,uSkL,gProg=0;float gS[3]={1,1,0},gMR[2]={0,.5f},gSk=0;void initText();void initPost();void initMC();
-struct Mesh{GLuint vao=0,vbo=0;int n=0;GLenum mode=GL_TRIANGLES;std::vector<float> cpu;float rad=1;GLuint svbo=0;bool skinned=false;std::vector<float> skin;};
+void main(){if(uL<-1.5){vec2 q=(vP.xy-.5)*uS.xy;float dd=(abs(q.x)+abs(q.y)-uS.x*.5)*.7071;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL<0.0){vec2 q=(vP.xy-.5)*uS.xy;vec2 e=abs(q)-uS.xy*.5+uS.z;float dd=length(max(e,0.0))+min(max(e.x,e.y),0.0)-uS.z;o=vec4(uC.rgb,uC.a*clamp(.5-dd,0.0,1.0));return;} if(uL>0.5){if(uTL.w>0.5&&uTL.x>=0.0&&texture(uTex,vec3(vUV,uTL.x)).a<0.5)discard;o=vec4(pbr(),uC.a);return;} o=vec4(uC.rgb,uC.a);})";
+GLuint uMVP,uM,uC,uL,uS,uCamL,uMRL,uJL,uSkL,uTLL,uTexL,gProg=0;float gS[3]={1,1,0},gMR[2]={0,.5f},gSk=0,gTL[4]={-1,-1,-1,0};void initText();void initPost();void initMC();void initTexArr();
+struct Mesh{GLuint vao=0,vbo=0;int n=0;GLenum mode=GL_TRIANGLES;std::vector<float> cpu;float rad=1;GLuint svbo=0;bool skinned=false;std::vector<float> skin;GLuint uvbo=0;std::vector<float> uv;};
 std::vector<Mesh> meshes(6); // 0 cubo,1 esfera,2 plano,3 quad2D,4 grade,5 osso
 GLuint sh(GLenum t,const char*s){GLuint h=glCreateShader(t);glShaderSource(h,1,&s,0);glCompileShader(h);GLint ok;glGetShaderiv(h,GL_COMPILE_STATUS,&ok);
  if(!ok){char b[512];glGetShaderInfoLog(h,512,0,b);__android_log_print(ANDROID_LOG_ERROR,"NA","%s",b);}return h;}
@@ -149,6 +156,8 @@ void attachSkin(Mesh&m,const std::vector<float>&sk){
  glBindVertexArray(m.vao);glGenBuffers(1,&m.svbo);glBindBuffer(GL_ARRAY_BUFFER,m.svbo);glBufferData(GL_ARRAY_BUFFER,sk.size()*4,sk.data(),GL_STATIC_DRAW);
  glEnableVertexAttribArray(2);glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,32,(void*)0);
  glEnableVertexAttribArray(3);glVertexAttribPointer(3,4,GL_FLOAT,GL_FALSE,32,(void*)16);m.skinned=true;m.skin=sk;}
+void attachUV(Mesh&m,const std::vector<float>&uv){glBindVertexArray(m.vao);glGenBuffers(1,&m.uvbo);glBindBuffer(GL_ARRAY_BUFFER,m.uvbo);glBufferData(GL_ARRAY_BUFFER,uv.size()*4,uv.data(),GL_STATIC_DRAW);
+ glEnableVertexAttribArray(4);glVertexAttribPointer(4,2,GL_FLOAT,GL_FALSE,8,(void*)0);m.uv=uv;}
 void buildMeshes(){
  std::vector<float> a;
  V F[6][3]={{{1,0,0},{0,1,0},{0,0,1}},{{-1,0,0},{0,0,1},{0,1,0}},{{0,1,0},{0,0,1},{1,0,0}},
@@ -178,11 +187,11 @@ void buildMeshes(){
 void initGL(){
  GLuint p=gProg=glCreateProgram();glAttachShader(p,sh(GL_VERTEX_SHADER,VS));glAttachShader(p,sh(GL_FRAGMENT_SHADER,FS));
  glLinkProgram(p);glUseProgram(p);
- uMVP=glGetUniformLocation(p,"uMVP");uM=glGetUniformLocation(p,"uM");uC=glGetUniformLocation(p,"uC");uL=glGetUniformLocation(p,"uL");uS=glGetUniformLocation(p,"uS");uCamL=glGetUniformLocation(p,"uCam");uJL=glGetUniformLocation(p,"uJ");uSkL=glGetUniformLocation(p,"uSk");uMRL=glGetUniformLocation(p,"uMR");
- glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);buildMeshes();for(size_t i=6;i<meshes.size();i++){std::vector<float> c=meshes[i].cpu,sk=meshes[i].skin;float r=meshes[i].rad;meshes[i]=upload(c,GL_TRIANGLES);meshes[i].rad=r;if(!sk.empty())attachSkin(meshes[i],sk);}initText();initPost();initMC();}
+ uMVP=glGetUniformLocation(p,"uMVP");uM=glGetUniformLocation(p,"uM");uC=glGetUniformLocation(p,"uC");uL=glGetUniformLocation(p,"uL");uS=glGetUniformLocation(p,"uS");uCamL=glGetUniformLocation(p,"uCam");uJL=glGetUniformLocation(p,"uJ");uSkL=glGetUniformLocation(p,"uSk");uTLL=glGetUniformLocation(p,"uTL");uTexL=glGetUniformLocation(p,"uTex");glUniform1i(uTexL,1);uMRL=glGetUniformLocation(p,"uMR");
+ glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);buildMeshes();for(size_t i=6;i<meshes.size();i++){std::vector<float> c=meshes[i].cpu,sk=meshes[i].skin,uvv=meshes[i].uv;float r=meshes[i].rad;meshes[i]=upload(c,GL_TRIANGLES);meshes[i].rad=r;if(!sk.empty())attachSkin(meshes[i],sk);if(!uvv.empty())attachUV(meshes[i],uvv);}initText();initPost();initMC();initTexArr();}
 void draw(Mesh&m,const M&mvp,const M&mod,float r,float g,float b,float a,float lit){
  glUniformMatrix4fv(uMVP,1,GL_FALSE,mvp.m);glUniformMatrix4fv(uM,1,GL_FALSE,mod.m);
- glUniform4f(uC,r,g,b,a);glUniform1f(uL,lit);glUniform3f(uS,gS[0],gS[1],gS[2]);glUniform2f(uMRL,gMR[0],gMR[1]);glUniform1f(uSkL,gSk);glBindVertexArray(m.vao);glDrawArrays(m.mode,0,m.n);}
+ glUniform4f(uC,r,g,b,a);glUniform1f(uL,lit);glUniform3f(uS,gS[0],gS[1],gS[2]);glUniform2f(uMRL,gMR[0],gMR[1]);glUniform1f(uSkL,gSk);glUniform4f(uTLL,gTL[0],gTL[1],gTL[2],gTL[3]);glBindVertexArray(m.vao);glDrawArrays(m.mode,0,m.n);}
 
 // ---------- UI 2D ----------
 void rect(float x,float y,float w,float h,float r,float g,float b,float a=1,float rad=0){
@@ -460,7 +469,7 @@ std::string unzipModel(const std::string&zp){
   std::string l=name;for(auto&c:l)c=(char)tolower((unsigned char)c);
   auto ends=[&](const char*x){size_t k=strlen(x);return l.size()>k&&l.compare(l.size()-k,k,x)==0;};
   bool isg=ends(".gltf")||ends(".glb");
-  if(!(isg||ends(".bin"))||name.find("..")!=std::string::npos||name[0]=='/')continue;
+  if(!(isg||ends(".bin")||ends(".png")||ends(".jpg")||ends(".jpeg"))||name.find("..")!=std::string::npos||name[0]=='/')continue;
   if((long)lo+30>sz||rd32(&z[lo])!=0x04034b50)continue;
   uint32_t ds=lo+30+rd16(&z[lo+26])+rd16(&z[lo+28]);if((long)ds+(long)csz>sz)continue;
   std::vector<unsigned char> o(usz?usz:1);
@@ -484,34 +493,79 @@ void scanDir(const std::string&dp,int depth,std::vector<std::pair<time_t,std::st
 void scanFiles(){gFiles.clear();std::vector<std::pair<time_t,std::string>> v;
  scanDir("/storage/emulated/0/Download",1,v);scanDir(gDir,1,v);
  std::sort(v.rbegin(),v.rend());for(size_t i=0;i<v.size()&&i<8;i++)gFiles.push_back(v[i].second);}
+// ---------- texturas (array 1024x1024, ate 16 imagens) ----------
+const int TEXN=1024,TEXMAX=16;GLuint gTexArr=0;std::vector<std::vector<unsigned char>> gTexCpu;
+void initTexArr(){gTexArr=0;if(gTexCpu.empty())return;glActiveTexture(GL_TEXTURE0);glGenTextures(1,&gTexArr);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);
+ glTexStorage3D(GL_TEXTURE_2D_ARRAY,11,GL_RGBA8,TEXN,TEXN,TEXMAX);
+ glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+ glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_S,GL_REPEAT);glTexParameteri(GL_TEXTURE_2D_ARRAY,GL_TEXTURE_WRAP_T,GL_REPEAT);
+ for(size_t i=0;i<gTexCpu.size();i++)glTexSubImage3D(GL_TEXTURE_2D_ARRAY,0,0,0,(GLint)i,TEXN,TEXN,1,GL_RGBA,GL_UNSIGNED_BYTE,gTexCpu[i].data());
+ glGenerateMipmap(GL_TEXTURE_2D_ARRAY);}
+int addTexture(const unsigned char*data,int len){
+ if(!data||len<8||(int)gTexCpu.size()>=TEXMAX)return -1;int w=0,h=0,c=0;unsigned char*px=stbi_load_from_memory(data,len,&w,&h,&c,4);
+ if(!px||w<1||h<1){if(px)stbi_image_free(px);return -1;}
+ std::vector<unsigned char> out((size_t)TEXN*TEXN*4);
+ for(int y=0;y<TEXN;y++){float fy=(y+.5f)*h/TEXN-.5f;int y0=(int)floorf(fy);float ty=fy-y0;int ya=std::clamp(y0,0,h-1),yb=std::clamp(y0+1,0,h-1);
+  for(int x=0;x<TEXN;x++){float fx=(x+.5f)*w/TEXN-.5f;int x0=(int)floorf(fx);float tx_=fx-x0;int xa=std::clamp(x0,0,w-1),xb=std::clamp(x0+1,0,w-1);
+   const unsigned char*p00=px+((size_t)ya*w+xa)*4,*p10=px+((size_t)ya*w+xb)*4,*p01=px+((size_t)yb*w+xa)*4,*p11=px+((size_t)yb*w+xb)*4;
+   for(int k=0;k<4;k++){float a=p00[k]+(p10[k]-p00[k])*tx_,b=p01[k]+(p11[k]-p01[k])*tx_;out[((size_t)y*TEXN+x)*4+k]=(unsigned char)std::clamp(a+(b-a)*ty+.5f,0.f,255.f);}}}
+ stbi_image_free(px);gTexCpu.push_back(std::move(out));int layer=(int)gTexCpu.size()-1;
+ if(!gTexArr)initTexArr();else{glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);
+  glTexSubImage3D(GL_TEXTURE_2D_ARRAY,0,0,0,layer,TEXN,TEXN,1,GL_RGBA,GL_UNSIGNED_BYTE,gTexCpu[layer].data());glGenerateMipmap(GL_TEXTURE_2D_ARRAY);}
+ return layer;}
+std::vector<unsigned char> b64dec(const std::string&s2){std::vector<unsigned char> o;int val=0,bits=-8;
+ for(unsigned char ch:s2){int d;if(ch>='A'&&ch<='Z')d=ch-'A';else if(ch>='a'&&ch<='z')d=ch-'a'+26;else if(ch>='0'&&ch<='9')d=ch-'0'+52;else if(ch=='+'||ch=='-')d=62;else if(ch=='/'||ch=='_')d=63;else continue;
+  val=(val<<6)+d;bits+=6;if(bits>=0){o.push_back((unsigned char)((val>>bits)&0xFF));bits-=8;}}return o;}
+int gltfImage(cgltf_data*d,cgltf_image*im,const std::string&dir,std::vector<int>&cache){
+ if(!im)return -1;size_t ix=(size_t)(im-d->images);if(ix>=cache.size())return -1;if(cache[ix]!=-2)return cache[ix];int L=-1;
+ if(im->buffer_view&&im->buffer_view->buffer&&im->buffer_view->buffer->data){const unsigned char*bd=(const unsigned char*)im->buffer_view->buffer->data+im->buffer_view->offset;L=addTexture(bd,(int)im->buffer_view->size);}
+ else if(im->uri){std::string u=im->uri;
+  if(u.compare(0,5,"data:")==0){size_t c=u.find(',');if(c!=std::string::npos){std::vector<unsigned char> bin=b64dec(u.substr(c+1));L=addTexture(bin.data(),(int)bin.size());}}
+  else{std::string dec;for(size_t i=0;i<u.size();i++){if(u[i]=='%'&&i+2<u.size()){dec+=(char)strtol(u.substr(i+1,2).c_str(),nullptr,16);i+=2;}else dec+=u[i];}
+   FILE*f=fopen((dir+dec).c_str(),"rb");if(f){fseek(f,0,SEEK_END);long sz=ftell(f);fseek(f,0,SEEK_SET);
+    if(sz>0&&sz<80000000){std::vector<unsigned char> b(sz);if(fread(b.data(),1,sz,f)==(size_t)sz)L=addTexture(b.data(),(int)sz);}fclose(f);}}}
+ cache[ix]=L;return L;}
 void importGLTF(const std::string&path){
  cgltf_options op;memset(&op,0,sizeof op);cgltf_data*d=nullptr;
  if(cgltf_parse_file(&op,path.c_str(),&d)!=cgltf_result_success){toast("Falha ao ler o arquivo");return;}
  if(cgltf_load_buffers(&op,d,path.c_str())!=cgltf_result_success){cgltf_free(d);toast("Falta o .bin: ele precisa estar na mesma pasta do .gltf");return;}
- std::vector<int> mi(d->meshes_count,-1);std::vector<V> mc(d->meshes_count,V{.8f,.8f,.8f});std::vector<float> mmt(d->meshes_count,0.f),mrg(d->meshes_count,.6f);
- for(size_t m=0;m<d->meshes_count;m++){std::vector<float> v;bool gotc=false;std::vector<float> sk;bool anySk=false;
-  for(size_t pi=0;pi<d->meshes[m].primitives_count;pi++){cgltf_primitive&pr=d->meshes[m].primitives[pi];if(pr.type!=cgltf_primitive_type_triangles)continue;
-   cgltf_accessor*pos=nullptr,*nor=nullptr,*jn=nullptr,*wt=nullptr;
-   for(size_t a=0;a<pr.attributes_count;a++){if(pr.attributes[a].type==cgltf_attribute_type_position)pos=pr.attributes[a].data;else if(pr.attributes[a].type==cgltf_attribute_type_normal)nor=pr.attributes[a].data;else if(pr.attributes[a].type==cgltf_attribute_type_joints&&pr.attributes[a].index==0)jn=pr.attributes[a].data;else if(pr.attributes[a].type==cgltf_attribute_type_weights&&pr.attributes[a].index==0)wt=pr.attributes[a].data;}
-   if(!pos)continue;if(jn&&wt)anySk=true;
-   if(!gotc&&pr.material&&pr.material->has_pbr_metallic_roughness){const float*c=pr.material->pbr_metallic_roughness.base_color_factor;mc[m]=V{c[0],c[1],c[2]};mmt[m]=pr.material->pbr_metallic_roughness.metallic_factor;mrg[m]=pr.material->pbr_metallic_roughness.roughness_factor;gotc=true;}
-   size_t cnt=pr.indices?pr.indices->count:pos->count;
-   for(size_t i=0;i+2<cnt;i+=3){V P[3],N[3];float SK[3][8];
-    for(int k=0;k<3;k++){size_t ix=pr.indices?cgltf_accessor_read_index(pr.indices,i+k):i+k;float f[4]={0,0,0,0};
-     cgltf_accessor_read_float(pos,ix,f,3);P[k]=V{f[0],f[1],f[2]};
-     if(nor){cgltf_accessor_read_float(nor,ix,f,3);N[k]=V{f[0],f[1],f[2]};}
-     float jf[4]={0,0,0,0},wf[4]={1,0,0,0};
-     if(jn&&wt){cgltf_accessor_read_float(jn,ix,jf,4);cgltf_accessor_read_float(wt,ix,wf,4);float sm=wf[0]+wf[1]+wf[2]+wf[3];
-      if(sm<1e-6f){wf[0]=1;wf[1]=wf[2]=wf[3]=0;jf[0]=0;}else for(int q=0;q<4;q++){if(jf[q]>=64){wf[q]=0;jf[q]=0;}wf[q]/=sm;}}
-     for(int q=0;q<4;q++){SK[k][q]=jf[q];SK[k][4+q]=wf[q];}}
-    if(!nor){V fn=cross(P[1]-P[0],P[2]-P[0]);float l=sqrtf(dot(fn,fn));fn=l>1e-12f?fn*(1/l):V{0,1,0};N[0]=N[1]=N[2]=fn;}
-    for(int k=0;k<3;k++){vtx(v,P[k],N[k]);sk.insert(sk.end(),SK[k],SK[k]+8);}}}
+ std::string dir=path.substr(0,path.rfind('/')+1);std::vector<int> imgc(d->images_count,-2);
+ struct PR{int mesh=5;V col{.8f,.8f,.8f};float met=0,rou=.6f;int tb=-1,tm=-1,tn=-1;float ac=0;};
+ std::vector<std::vector<PR>> prs(d->meshes_count);
+ for(size_t m=0;m<d->meshes_count;m++)for(size_t pi=0;pi<d->meshes[m].primitives_count;pi++){
+  cgltf_primitive&pr=d->meshes[m].primitives[pi];if(pr.type!=cgltf_primitive_type_triangles)continue;
+  cgltf_accessor*pos=nullptr,*nor=nullptr,*jn=nullptr,*wt=nullptr,*tc=nullptr;
+  for(size_t a=0;a<pr.attributes_count;a++){cgltf_attribute&at=pr.attributes[a];
+   if(at.type==cgltf_attribute_type_position)pos=at.data;else if(at.type==cgltf_attribute_type_normal)nor=at.data;
+   else if(at.type==cgltf_attribute_type_joints&&at.index==0)jn=at.data;else if(at.type==cgltf_attribute_type_weights&&at.index==0)wt=at.data;
+   else if(at.type==cgltf_attribute_type_texcoord&&at.index==0)tc=at.data;}
+  if(!pos)continue;
+  PR res;
+  if(pr.material){cgltf_material*mt=pr.material;
+   if(mt->has_pbr_metallic_roughness){const float*c=mt->pbr_metallic_roughness.base_color_factor;res.col=V{c[0],c[1],c[2]};
+    res.met=mt->pbr_metallic_roughness.metallic_factor;res.rou=mt->pbr_metallic_roughness.roughness_factor;
+    if(tc&&mt->pbr_metallic_roughness.base_color_texture.texture)res.tb=gltfImage(d,mt->pbr_metallic_roughness.base_color_texture.texture->image,dir,imgc);
+    if(tc&&mt->pbr_metallic_roughness.metallic_roughness_texture.texture)res.tm=gltfImage(d,mt->pbr_metallic_roughness.metallic_roughness_texture.texture->image,dir,imgc);}
+   if(tc&&mt->normal_texture.texture)res.tn=gltfImage(d,mt->normal_texture.texture->image,dir,imgc);
+   if(mt->alpha_mode!=cgltf_alpha_mode_opaque&&res.tb>=0)res.ac=1;}
+  std::vector<float> v,sk,uvs;size_t cnt=pr.indices?pr.indices->count:pos->count;
+  for(size_t i=0;i+2<cnt;i+=3){V P[3],N[3];float SK[3][8];float UVk[3][2];
+   for(int k=0;k<3;k++){size_t ix=pr.indices?cgltf_accessor_read_index(pr.indices,i+k):i+k;float f[4]={0,0,0,0};
+    cgltf_accessor_read_float(pos,ix,f,3);P[k]=V{f[0],f[1],f[2]};
+    if(nor){cgltf_accessor_read_float(nor,ix,f,3);N[k]=V{f[0],f[1],f[2]};}
+    float jf[4]={0,0,0,0},wf[4]={1,0,0,0};
+    if(jn&&wt){cgltf_accessor_read_float(jn,ix,jf,4);cgltf_accessor_read_float(wt,ix,wf,4);float sm=wf[0]+wf[1]+wf[2]+wf[3];
+     if(sm<1e-6f){wf[0]=1;wf[1]=wf[2]=wf[3]=0;jf[0]=0;}else for(int q=0;q<4;q++){if(jf[q]>=64){wf[q]=0;jf[q]=0;}wf[q]/=sm;}}
+    for(int q=0;q<4;q++){SK[k][q]=jf[q];SK[k][4+q]=wf[q];}
+    float tv2[2]={0,0};if(tc)cgltf_accessor_read_float(tc,ix,tv2,2);UVk[k][0]=tv2[0];UVk[k][1]=tv2[1];}
+   if(!nor){V fn=cross(P[1]-P[0],P[2]-P[0]);float l=sqrtf(dot(fn,fn));fn=l>1e-12f?fn*(1/l):V{0,1,0};N[0]=N[1]=N[2]=fn;}
+   for(int k=0;k<3;k++){vtx(v,P[k],N[k]);sk.insert(sk.end(),SK[k],SK[k]+8);uvs.push_back(UVk[k][0]);uvs.push_back(UVk[k][1]);}}
   if(v.empty())continue;
   Mesh mm=upload(v,GL_TRIANGLES);float r=0;for(size_t i=0;i+2<v.size();i+=6)r=std::max(r,sqrtf(v[i]*v[i]+v[i+1]*v[i+1]+v[i+2]*v[i+2]));
-  mm.rad=r>0?r:1;if(anySk)attachSkin(mm,sk);meshes.push_back(mm);mi[m]=(int)meshes.size()-1;}
+  mm.rad=r>0?r:1;if(jn&&wt)attachSkin(mm,sk);if(tc)attachUV(mm,uvs);meshes.push_back(mm);res.mesh=(int)meshes.size()-1;prs[m].push_back(res);}
  int base=(int)objs.size();size_t nn=d->nodes_count;int sb=(int)skins.size();
  for(size_t i=0;i<nn;i++){cgltf_node*nd=&d->nodes[i];Obj o;int mid=nd->mesh?(int)(nd->mesh-d->meshes):-1;
-  o.mesh=(mid>=0&&mi[mid]>=0)?mi[mid]:5;o.col=(o.mesh==5)?V{.85f,.85f,.65f}:mc[mid];if(o.mesh!=5){o.met=mmt[mid];o.rou=mrg[mid];}
+  if(mid>=0&&!prs[mid].empty()){PR&q=prs[mid][0];o.mesh=q.mesh;o.col=q.col;o.met=q.met;o.rou=q.rou;o.tb=q.tb;o.tm=q.tm;o.tn=q.tn;o.ac=q.ac;}else{o.mesh=5;o.col=V{.85f,.85f,.65f};}
   snprintf(o.nm,24,"%s",nd->name?nd->name:"Node");o.skin=nd->skin?sb+(int)(nd->skin-d->skins):-1;o.parent=nd->parent?base+(int)(nd->parent-d->nodes):-1;T&t=o.cur;
   if(nd->has_matrix){float m[16];cgltf_node_transform_local(nd,m);t.p=V{m[12],m[13],m[14]};
    float sx=sqrtf(m[0]*m[0]+m[1]*m[1]+m[2]*m[2]),sy=sqrtf(m[4]*m[4]+m[5]*m[5]+m[6]*m[6]),sz=sqrtf(m[8]*m[8]+m[9]*m[9]+m[10]*m[10]);
@@ -523,6 +577,9 @@ void importGLTF(const std::string&path){
   if(o.mesh==5){o.len=.25f;for(size_t c=0;c<nd->children_count;c++){cgltf_node*ch=nd->children[c];
    if(ch->has_translation){V tv{ch->translation[0],ch->translation[1],ch->translation[2]};float l=sqrtf(dot(tv,tv));if(l>.01f){o.len=l;break;}}}}
   objs.push_back(o);}
+ for(size_t i=0;i<nn;i++){cgltf_node*nd=&d->nodes[i];if(!nd->mesh)continue;int mid=(int)(nd->mesh-d->meshes);
+  for(size_t q=1;q<prs[mid].size();q++){PR&r=prs[mid][q];Obj o;o.mesh=r.mesh;o.col=r.col;o.met=r.met;o.rou=r.rou;o.tb=r.tb;o.tm=r.tm;o.tn=r.tn;o.ac=r.ac;
+   snprintf(o.nm,24,"%.20s.%d",objs[base+i].nm,(int)q);o.parent=base+(int)i;o.skin=objs[base+i].skin;objs.push_back(o);}}
  for(size_t si=0;si<d->skins_count;si++){cgltf_skin&cs=d->skins[si];Skin sk;
   for(size_t k=0;k<cs.joints_count;k++){sk.j.push_back(base+(int)(cs.joints[k]-d->nodes));M im=id();
    if(cs.inverse_bind_matrices){float f16[16];cgltf_accessor_read_float(cs.inverse_bind_matrices,k,f16,16);memcpy(im.m,f16,sizeof im.m);}sk.ibm.push_back(im);}
@@ -605,6 +662,9 @@ layout(rgba32f,binding=0) writeonly uniform highp image2D uOut;
 uniform highp sampler2D uPrev;
 layout(rgba16f,binding=1) writeonly uniform highp image2D uAovOut;
 uniform highp sampler2D uAovPrev;
+layout(rgba16f,binding=2) writeonly uniform highp image2D uAlbOut;
+uniform highp sampler2D uAlbPrev;
+uniform highp sampler2DArray uTexA;
 uniform int uN;
 layout(std430,binding=0) readonly buffer NB{vec4 nd[];};
 layout(std430,binding=1) readonly buffer TB{vec4 tr[];};
@@ -626,7 +686,9 @@ bool hit(vec3 o,vec3 d,bool any,out float th,out int ti,out vec2 buv){
   if(cnt>0){for(int i=0;i<cnt;i++){int t=lf+i;vec3 p0=tr[8*t].xyz,p1=tr[8*t+1].xyz,p2=tr[8*t+2].xyz;
     vec3 e1=p1-p0,e2=p2-p0,pv=cross(d,e2);float det=dot(e1,pv);if(abs(det)<1e-12)continue;float inv=1.0/det;
     vec3 tv=o-p0;float u=dot(tv,pv)*inv;if(u<0.0||u>1.0)continue;vec3 qv=cross(tv,e1);float v=dot(d,qv)*inv;if(v<0.0||u+v>1.0)continue;
-    float tt=dot(e2,qv)*inv;if(tt>1e-4&&tt<th){th=tt;ti=t;buv=vec2(u,v);if(any)return true;}}}
+    float tt=dot(e2,qv)*inv;if(tt>1e-4&&tt<th){
+     float ya=tr[8*t+7].y;if(fract(ya+0.001)>0.25){int lb=int(floor(ya+0.001));if(lb>=0){float w0=1.0-u-v;vec2 uq=vec2(tr[8*t].w*w0+tr[8*t+1].w*u+tr[8*t+2].w*v,tr[8*t+3].w*w0+tr[8*t+4].w*u+tr[8*t+5].w*v);if(textureLod(uTexA,vec3(uq,float(lb)),0.0).a<0.5)continue;}}
+     th=tt;ti=t;buv=vec2(u,v);if(any)return true;}}}
   else{st[sp++]=lf;st[sp++]=n+1;}}
  return ti>=0;}
 vec3 brdf(vec3 L,vec3 N,vec3 V,vec3 alb,float met,float rou,vec3 F0){
@@ -640,15 +702,25 @@ void main(){
  rs=pcg(uint(px.x)*1973u+uint(px.y)*9277u+uint(uFrame)*26699u+1u);
  vec2 uv=(vec2(px)+vec2(rnd(),rnd()))/vec2(uSize)*2.0-1.0;
  vec3 rd=normalize(uF+uR*(uv.x*uTH.x)+uU*(uv.y*uTH.y));vec3 ro=uCam;
- vec3 Lo=vec3(0.0),T=vec3(1.0);vec3 aN=vec3(0.0);float aD=1e4;
+ vec3 Lo=vec3(0.0),T=vec3(1.0);vec3 aN=vec3(0.0);float aD=1e4;vec3 aA=vec3(1.0);
  for(int b=0;b<uBounces;b++){
   float th;int ti;vec2 bu;
   if(!hit(ro,rd,false,th,ti,bu)){Lo+=T*sky(rd);break;}
   vec3 n0=tr[8*ti+3].xyz,n1=tr[8*ti+4].xyz,n2=tr[8*ti+5].xyz;
   vec3 N=normalize(n0*(1.0-bu.x-bu.y)+n1*bu.x+n2*bu.y);
   vec4 m1=tr[8*ti+6],m2=tr[8*ti+7];
-  vec3 alb=m1.rgb;float met=m1.a,rou=clamp(m2.x,0.05,1.0);vec3 F0=mix(vec3(0.04),alb,met);
-  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;if(b==0){aN=N;aD=th;}vec3 P=ro+rd*th+N*0.002;
+  float w0=1.0-bu.x-bu.y;vec2 tuv=vec2(tr[8*ti].w*w0+tr[8*ti+1].w*bu.x+tr[8*ti+2].w*bu.y,tr[8*ti+3].w*w0+tr[8*ti+4].w*bu.x+tr[8*ti+5].w*bu.y);
+  int lb=int(floor(m2.y+0.001)),lm=int(floor(m2.z+0.001)),ln=int(floor(m2.w+0.001));
+  vec3 alb=m1.rgb;float met=m1.a,rou=m2.x;
+  if(lb>=0)alb*=pow(textureLod(uTexA,vec3(tuv,float(lb)),0.0).rgb,vec3(2.2));
+  if(lm>=0){vec4 mrs=textureLod(uTexA,vec3(tuv,float(lm)),0.0);rou*=mrs.g;met*=mrs.b;}
+  rou=clamp(rou,0.05,1.0);
+  if(ln>=0){vec3 tn=textureLod(uTexA,vec3(tuv,float(ln)),0.0).xyz*2.0-1.0;
+   vec3 qa=tr[8*ti].xyz,qb=tr[8*ti+1].xyz,qc=tr[8*ti+2].xyz;vec3 e1=qb-qa,e2=qc-qa;
+   vec2 ua=vec2(tr[8*ti].w,tr[8*ti+3].w),ub=vec2(tr[8*ti+1].w,tr[8*ti+4].w),uc=vec2(tr[8*ti+2].w,tr[8*ti+5].w);vec2 d1=ub-ua,d2=uc-ua;float rr=d1.x*d2.y-d2.x*d1.y;
+   if(abs(rr)>1e-12){vec3 Tt=(e1*d2.y-e2*d1.y)/rr,Bt=-(e2*d1.x-e1*d2.x)/rr;Tt=normalize(Tt-N*dot(N,Tt));Bt=normalize(Bt-N*dot(N,Bt)-Tt*dot(Tt,Bt));N=normalize(Tt*tn.x+Bt*tn.y+N*tn.z);}}
+  vec3 F0=mix(vec3(0.04),alb,met);
+  vec3 V=-rd;if(dot(N,V)<0.0)N=-N;if(b==0){aN=N;aD=th;aA=alb;}vec3 P=ro+rd*th+N*0.002;
   vec3 TT,BB;basis(uSunD,TT,BB);float cz=1.0-rnd()*(1.0-uSunCos),sz=sqrt(max(1.0-cz*cz,0.0)),ph=2.0*PI*rnd();
   vec3 sd=normalize(TT*(sz*cos(ph))+BB*(sz*sin(ph))+uSunD*cz);float NLs=dot(N,sd);
   if(NLs>0.0){float t2;int i2;vec2 b2;if(!hit(P,sd,true,t2,i2,b2))Lo+=T*brdf(sd,N,V,alb,met,rou,F0)*uSunC*NLs;}
@@ -666,15 +738,16 @@ void main(){
  vec4 prev=uFirst==1?vec4(0.0):texelFetch(uPrev,px,0);
  imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));
  vec4 av=vec4(aN,aD);vec4 pa=uFirst==1?av:texelFetch(uAovPrev,px,0);
- imageStore(uAovOut,px,vec4(pa.rgb+(av.rgb-pa.rgb)/float(uN),pa.a+(av.a-pa.a)/float(uN)));}
+ imageStore(uAovOut,px,vec4(pa.rgb+(av.rgb-pa.rgb)/float(uN),pa.a+(av.a-pa.a)/float(uN)));
+ vec4 al=vec4(aA,1.0);vec4 pl=uFirst==1?al:texelFetch(uAlbPrev,px,0);imageStore(uAlbOut,px,vec4(pl.rgb+(al.rgb-pl.rgb)/float(uN),1.0));}
 )MC";
 const char*DNCS=R"MC(#version 310 es
 precision highp float;precision highp int;
 layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
 layout(rgba16f,binding=0) writeonly uniform highp image2D uOut;
-uniform highp sampler2D uSrc;uniform highp sampler2D uAov;
-uniform ivec2 uSize;uniform int uStep,uIter0;uniform float uPhiC;
-vec3 col(ivec2 p){vec4 c=texelFetch(uSrc,p,0);return uIter0==1?(c.a>0.0?c.rgb/c.a:vec3(0.0)):c.rgb;}
+uniform highp sampler2D uSrc;uniform highp sampler2D uAov;uniform highp sampler2D uAlb;
+uniform ivec2 uSize;uniform int uStep,uIter0,uLast;uniform float uPhiC;
+vec3 col(ivec2 p){vec4 c=texelFetch(uSrc,p,0);return uIter0==1?(c.a>0.0?c.rgb/c.a:vec3(0.0))/max(texelFetch(uAlb,p,0).rgb,vec3(.03)):c.rgb;}
 float lum(vec3 c){return dot(c,vec3(0.2126,0.7152,0.0722));}
 void main(){ivec2 p=ivec2(gl_GlobalInvocationID.xy);if(p.x>=uSize.x||p.y>=uSize.y)return;
  vec4 ap=texelFetch(uAov,p,0);vec3 cp=col(p);float lp=lum(cp);vec3 sum=vec3(0.0);float ws=0.0;
@@ -685,7 +758,7 @@ void main(){ivec2 p=ivec2(gl_GlobalInvocationID.xy);if(p.x>=uSize.x||p.y>=uSize.
   float wd=exp(-abs(ap.w-aq.w)/(0.03*ap.w+0.02*float(uStep)*ap.w+1e-3));
   float wc=exp(-abs(lp-lum(cq))/uPhiC);
   float w=(i==0&&j==0)?k:k*wn*wd*wc;sum+=cq*w;ws+=w;}
- imageStore(uOut,p,vec4(sum/max(ws,1e-6),1.0));}
+ vec3 res=sum/max(ws,1e-6);if(uLast==1)res*=max(texelFetch(uAlb,p,0).rgb,vec3(.03));imageStore(uOut,p,vec4(res,1.0));}
 )MC";
 const char*MCTM=R"MC(#version 300 es
 precision highp float; in vec2 vUV; uniform sampler2D uAcc; uniform ivec2 uSz; out vec4 o;
@@ -695,12 +768,12 @@ void main(){vec2 p=vUV*vec2(uSz)-0.5;ivec2 i0=ivec2(floor(p));vec2 f=fract(p);
  c=c*(2.51*c+0.03)/(c*(2.43*c+0.59)+0.14);o=vec4(pow(clamp(c,0.0,1.0),vec3(1.0/2.2)),1.0);}
 )MC";
 // ---------- Monte Carlo (preview) e path tracing (render final) ----------
-struct TriD{V p[3],n[3];V col;float met=0,rou=.5f;};struct BN{V mn,mx;int lf=0,cnt=0;};
+struct TriD{V p[3],n[3];float uv[3][2]={};V col;float met=0,rou=.5f;float tb=-1,tm=-1,tn=-1,ac=0;};struct BN{V mn,mx;int lf=0,cnt=0;};
 std::vector<TriD> gTD;std::vector<int> gOrd;std::vector<V> gCen;std::vector<BN> gBN;
 bool gMcOK=false,gMcPrev=false,gMcFinal=false,gMcGround=true,gMcHaveCam=false;
 int gMcSpp=64,gMcSamples=0,gMcRow=0,gMcRows=24,gMcW=0,gMcH=0,gMcCur=0,gMcFrame=0;
 GLuint gMcTex[2]={0,0},gMcProg=0,gMcTm=0,gMcNB=0,gMcTB=0,gMcOutF=0,gMcOutT=0;
-GLuint gMcAov[2]={0,0},gMcDnT[2]={0,0},gDnProg=0;bool gMcDn=true,gMcDnOK=false,gDnDirty=false;int gMcDnRes=0;GLint dnSrc,dnAov,dnSz,dnStep,dnI0,dnPhi,mcAovPrev,mcN;
+GLuint gMcAov[2]={0,0},gMcAlb[2]={0,0},gMcDnT[2]={0,0},gDnProg=0;bool gMcDn=true,gMcDnOK=false,gDnDirty=false;int gMcDnRes=0;GLint dnSrc,dnAov,dnSz,dnStep,dnI0,dnPhi,mcAovPrev,mcN,dnAlb,dnLast,mcAlbPrev,mcTexA;
 GLint mcSz,mcOff,mcFirst,mcFr,mcBn,mcCam,mcF,mcR,mcU,mcTH,mcSD,mcSC,mcSCos,mcPrv,tmAcc,tmSz;
 double gSigS=-1,gSigC=-1,gMcLast=0;float gDt=.016f;V gCE,gCF,gCR,gCU;
 double nowSec(){timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
@@ -714,12 +787,12 @@ void gatherTris(){gTD.clear();std::vector<std::vector<M>> JS(skins.size());
   for(size_t k=0;k<sk.j.size();k++){M jw=sk.j[k]>=0?worldM(sk.j[k]):(k<sk.fz.size()?sk.fz[k]:id());JS[s2][k]=mul(jw,sk.ibm[k]);}}
  for(int i=0;i<(int)objs.size()&&gTD.size()<150000;i++){Obj&o=objs[i];if(o.mesh==5)continue;Mesh&m=meshes[o.mesh];if(m.cpu.empty())continue;
   M w=worldM(i);bool sk=o.skin>=0&&o.skin<(int)skins.size()&&m.skinned;V col{powf(o.col.x,2.2f),powf(o.col.y,2.2f),powf(o.col.z,2.2f)};
-  for(size_t v=0;v+17<m.cpu.size();v+=18){TriD t;t.col=col;t.met=o.met;t.rou=o.rou;
+  for(size_t v=0;v+17<m.cpu.size();v+=18){TriD t;t.col=col;t.met=o.met;t.rou=o.rou;t.tb=(float)o.tb;t.tm=(float)o.tm;t.tn=(float)o.tn;t.ac=o.ac;
    for(int k=0;k<3;k++){const float*c=&m.cpu[v+6*k];V pp{c[0],c[1],c[2]},nn{c[3],c[4],c[5]};
     if(sk){const float*sw=&m.skin[(v/6+k)*8];V ap,an;for(int q=0;q<4;q++){float wq=sw[4+q];if(wq<=0)continue;int ji=(int)sw[q];if(ji>=(int)JS[o.skin].size())continue;
       ap=ap+xf(JS[o.skin][ji],pp)*wq;an=an+xn(JS[o.skin][ji],nn)*wq;}pp=ap;nn=an;}
     else{pp=xf(w,pp);nn=xn(w,nn);}
-    float l=sqrtf(dot(nn,nn));t.p[k]=pp;t.n[k]=l>1e-8f?nn*(1/l):V{0,1,0};}
+    float l=sqrtf(dot(nn,nn));t.p[k]=pp;t.n[k]=l>1e-8f?nn*(1/l):V{0,1,0};size_t ui=(v/6+k)*2;if(m.uv.size()>=ui+2){t.uv[k][0]=m.uv[ui];t.uv[k][1]=m.uv[ui+1];}}
    gTD.push_back(t);}}
  if(gMcGround){TriD a;a.col=V{.25f,.25f,.25f};a.rou=.85f;V q[4]={{-60,-.002f,-60},{60,-.002f,-60},{60,-.002f,60},{-60,-.002f,60}};
   for(int k=0;k<3;k++)a.n[k]=V{0,1,0};TriD b=a;a.p[0]=q[0];a.p[1]=q[2];a.p[2]=q[1];b.p[0]=q[0];b.p[1]=q[3];b.p[2]=q[2];gTD.push_back(a);gTD.push_back(b);}
@@ -735,11 +808,11 @@ void mcBuild(){gatherTris();int n=(int)gTD.size();gOrd.resize(n);gCen.resize(n);
  gBN.clear();bvhRec(0,n);std::vector<float> nd,tr;
  auto bits=[](int v){float f;memcpy(&f,&v,4);return f;};
  for(auto&b:gBN)nd.insert(nd.end(),{b.mn.x,b.mn.y,b.mn.z,bits(b.lf),b.mx.x,b.mx.y,b.mx.z,bits(b.cnt)});
- for(int i=0;i<n;i++){TriD&t=gTD[gOrd[i]];for(int k=0;k<3;k++)tr.insert(tr.end(),{t.p[k].x,t.p[k].y,t.p[k].z,0.f});
-  for(int k=0;k<3;k++)tr.insert(tr.end(),{t.n[k].x,t.n[k].y,t.n[k].z,0.f});tr.insert(tr.end(),{t.col.x,t.col.y,t.col.z,t.met,t.rou,0.f,0.f,0.f});}
+ for(int i=0;i<n;i++){TriD&t=gTD[gOrd[i]];for(int k=0;k<3;k++)tr.insert(tr.end(),{t.p[k].x,t.p[k].y,t.p[k].z,t.uv[k][0]});
+  for(int k=0;k<3;k++)tr.insert(tr.end(),{t.n[k].x,t.n[k].y,t.n[k].z,t.uv[k][1]});tr.insert(tr.end(),{t.col.x,t.col.y,t.col.z,t.met,t.rou,t.tb+((t.ac>.5f&&t.tb>=0)?.5f:0.f),t.tm,t.tn});}
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcNB);glBufferData(GL_SHADER_STORAGE_BUFFER,nd.size()*4,nd.data(),GL_DYNAMIC_DRAW);
  glBindBuffer(GL_SHADER_STORAGE_BUFFER,gMcTB);glBufferData(GL_SHADER_STORAGE_BUFFER,tr.size()*4,tr.data(),GL_DYNAMIC_DRAW);}
-void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcAov[0]=gMcAov[1]=gMcDnT[0]=gMcDnT[1]=0;gMcDnOK=false;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
+void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gMcAov[0]=gMcAov[1]=gMcAlb[0]=gMcAlb[1]=gMcDnT[0]=gMcDnT[1]=0;gMcDnOK=false;gMcSamples=0;gSigS=gSigC=-1;gMcHaveCam=false;
  GLint ma=0,mi=0;glGetIntegerv(GL_MAJOR_VERSION,&ma);glGetIntegerv(GL_MINOR_VERSION,&mi);if(ma<3||(ma==3&&mi<1))return;
  GLuint p=glCreateProgram();glAttachShader(p,sh(GL_COMPUTE_SHADER,MCCS));glLinkProgram(p);GLint ok=0;glGetProgramiv(p,GL_LINK_STATUS,&ok);
  if(!ok){char b[512];glGetProgramInfoLog(p,512,0,b);__android_log_print(ANDROID_LOG_ERROR,"NA","MC: %s",b);return;}
@@ -747,18 +820,19 @@ void initMC(){gMcOK=false;gMcW=gMcH=0;gMcTex[0]=gMcTex[1]=0;gMcOutF=gMcOutT=0;gM
  mcBn=glGetUniformLocation(p,"uBounces");mcCam=glGetUniformLocation(p,"uCam");mcF=glGetUniformLocation(p,"uF");mcR=glGetUniformLocation(p,"uR");mcU=glGetUniformLocation(p,"uU");
  mcTH=glGetUniformLocation(p,"uTH");mcSD=glGetUniformLocation(p,"uSunD");mcSC=glGetUniformLocation(p,"uSunC");mcSCos=glGetUniformLocation(p,"uSunCos");mcPrv=glGetUniformLocation(p,"uPrev");
  const char*qv="#version 300 es\nlayout(location=0) in vec3 aP; out vec2 vUV; void main(){vUV=aP.xy;gl_Position=vec4(aP.xy*2.0-1.0,0.0,1.0);}";
- gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");mcAovPrev=glGetUniformLocation(p,"uAovPrev");mcN=glGetUniformLocation(p,"uN");
+ gMcTm=mkProg(qv,MCTM);tmAcc=glGetUniformLocation(gMcTm,"uAcc");tmSz=glGetUniformLocation(gMcTm,"uSz");mcAovPrev=glGetUniformLocation(p,"uAovPrev");mcN=glGetUniformLocation(p,"uN");mcAlbPrev=glGetUniformLocation(p,"uAlbPrev");mcTexA=glGetUniformLocation(p,"uTexA");
  {GLuint dp=glCreateProgram();glAttachShader(dp,sh(GL_COMPUTE_SHADER,DNCS));glLinkProgram(dp);GLint ok2=0;glGetProgramiv(dp,GL_LINK_STATUS,&ok2);
   if(ok2){gDnProg=dp;dnSrc=glGetUniformLocation(dp,"uSrc");dnAov=glGetUniformLocation(dp,"uAov");dnSz=glGetUniformLocation(dp,"uSize");
-   dnStep=glGetUniformLocation(dp,"uStep");dnI0=glGetUniformLocation(dp,"uIter0");dnPhi=glGetUniformLocation(dp,"uPhiC");}else gDnProg=0;}
+   dnStep=glGetUniformLocation(dp,"uStep");dnI0=glGetUniformLocation(dp,"uIter0");dnPhi=glGetUniformLocation(dp,"uPhiC");dnAlb=glGetUniformLocation(dp,"uAlb");dnLast=glGetUniformLocation(dp,"uLast");}else gDnProg=0;}
  glGenBuffers(1,&gMcNB);glGenBuffers(1,&gMcTB);glUseProgram(gProg);gMcOK=true;}
 void mcResize(int w,int h){
- if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(2,gMcAov);glDeleteTextures(2,gMcDnT);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
+ if(gMcTex[0]){glDeleteTextures(2,gMcTex);glDeleteTextures(2,gMcAov);glDeleteTextures(2,gMcAlb);glDeleteTextures(2,gMcDnT);glDeleteTextures(1,&gMcOutT);glDeleteFramebuffers(1,&gMcOutF);}
  glGenTextures(2,gMcTex);
  for(int i=0;i<2;i++){glBindTexture(GL_TEXTURE_2D,gMcTex[i]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA32F,w,h);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
- glGenTextures(2,gMcAov);glGenTextures(2,gMcDnT);
+ glGenTextures(2,gMcAov);glGenTextures(2,gMcDnT);glGenTextures(2,gMcAlb);
+ for(int i=0;i<2;i++){glBindTexture(GL_TEXTURE_2D,gMcAlb[i]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA16F,w,h);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
  for(int i=0;i<4;i++){glBindTexture(GL_TEXTURE_2D,i<2?gMcAov[i]:gMcDnT[i-2]);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA16F,w,h);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);}
@@ -785,7 +859,7 @@ void mcStep(){
  glUseProgram(gMcProg);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,gMcNB);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,gMcTB);
  glBindImageTexture(0,gMcTex[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);glUniform1i(mcPrv,0);
- glBindImageTexture(1,gMcAov[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(mcAovPrev,1);glActiveTexture(GL_TEXTURE0);glUniform1i(mcN,gMcSamples+1);
+ glBindImageTexture(1,gMcAov[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(mcAovPrev,1);glBindImageTexture(2,gMcAlb[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,gMcAlb[gMcCur]);glUniform1i(mcAlbPrev,2);glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);glUniform1i(mcTexA,3);glActiveTexture(GL_TEXTURE0);glUniform1i(mcN,gMcSamples+1);
  glUniform2i(mcSz,gMcW,gMcH);glUniform1i(mcOff,gMcRow);glUniform1i(mcFirst,gMcSamples==0?1:0);glUniform1i(mcFr,gMcFrame);glUniform1i(mcBn,gMcFinal?6:2);
  glUniform3f(mcCam,e.x,e.y,e.z);glUniform3f(mcF,f.x,f.y,f.z);glUniform3f(mcR,r.x,r.y,r.z);glUniform3f(mcU,u.x,u.y,u.z);
  float th=tanf(FOV/2);glUniform2f(mcTH,th*(float)gMcW/gMcH,th);
@@ -795,11 +869,11 @@ void mcStep(){
  gMcRow+=rows;if(gMcRow>=gMcH){gMcCur^=1;gMcSamples++;gMcRow=0;gMcFrame++;gDnDirty=true;}
  glUseProgram(gProg);}
 void mcDenoise(){if(!gMcDn||!gDnProg||!gMcTex[0])return;int iters=gMcFinal?4:3;glUseProgram(gDnProg);
- glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(dnAov,1);
+ glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(dnAov,1);glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,gMcAlb[gMcCur]);glUniform1i(dnAlb,2);
  for(int k=0;k<iters;k++){GLuint src=k==0?gMcTex[gMcCur]:gMcDnT[(k-1)&1];
   glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,src);glUniform1i(dnSrc,0);
   glBindImageTexture(0,gMcDnT[k&1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);
-  glUniform2i(dnSz,gMcW,gMcH);glUniform1i(dnStep,1<<k);glUniform1i(dnI0,k==0?1:0);glUniform1f(dnPhi,.15f+2.f/sqrtf((float)std::max(gMcSamples,1)));
+  glUniform2i(dnSz,gMcW,gMcH);glUniform1i(dnStep,1<<k);glUniform1i(dnI0,k==0?1:0);glUniform1i(dnLast,k==iters-1?1:0);glUniform1f(dnPhi,.15f+2.f/sqrtf((float)std::max(gMcSamples,1)));
   glDispatchCompute((gMcW+7)/8,(gMcH+7)/8,1);glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);}
  gMcDnRes=(iters-1)&1;gMcDnOK=true;glActiveTexture(GL_TEXTURE0);glUseProgram(gProg);}
 void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,(gMcDn&&gMcDnOK)?gMcDnT[gMcDnRes]:gMcTex[gMcCur]);
@@ -906,9 +980,10 @@ void frame(){
  draw(meshes[4],gVP,id(),.34f,.34f,.37f,1,0);
  auto ln=[&](V c,V sc,float r,float g,float b){T t;t.p=c;t.s=sc;M m=model(t);draw(meshes[0],mul(gVP,m),m,r,g,b,1,0);};
  ln({0,0,0},{20,.014f,.014f},.85f,.28f,.3f);ln({0,0,0},{.014f,.014f,20},.3f,.5f,.9f);
- for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];if(o.mesh==5)continue;M mod=worldM(i);bool skd=o.skin>=0&&meshes[o.mesh].skinned&&setJoints(o.skin);if(skd)mod=id();gSk=skd?1.f:0.f;float h=(i==sel)?.35f:0;gMR[0]=o.met;gMR[1]=o.rou;
+ glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);glActiveTexture(GL_TEXTURE0);
+ for(int i=0;i<(int)objs.size();i++){Obj&o=objs[i];if(o.mesh==5)continue;M mod=worldM(i);bool skd=o.skin>=0&&meshes[o.mesh].skinned&&setJoints(o.skin);if(skd)mod=id();gSk=skd?1.f:0.f;float h=(i==sel)?.35f:0;gMR[0]=o.met;gMR[1]=o.rou;gTL[0]=(float)o.tb;gTL[1]=(float)o.tm;gTL[2]=(float)o.tn;gTL[3]=o.ac;
   draw(meshes[o.mesh],mul(gVP,mod),mod,o.col.x+(1-o.col.x)*h,o.col.y+(1-o.col.y)*h,o.col.z+(1-o.col.z)*h,1,1);}
- gMR[0]=0;gMR[1]=.5f;gSk=0;if(post)runPost();mcFrame();
+ gMR[0]=0;gMR[1]=.5f;gSk=0;gTL[0]=gTL[1]=gTL[2]=-1;gTL[3]=0;glActiveTexture(GL_TEXTURE0);if(post)runPost();mcFrame();
  glDisable(GL_DEPTH_TEST);
  if(gBones)drawBones();
  if(sel>=0&&tool<3)drawGizmo();
@@ -920,7 +995,7 @@ void frame(){
   for(int k=0;k<12;k++){int id=RW[k];if(GP[k])x+=1.1f*u;
    bool on=(id>=3&&id<=6&&tool==id-3)||(id==8&&playing)||(id==11&&parentMode)||gFlash[id]>0;
    rect(x,by,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,.9f*u);icon2(id,x+bs/2,by+bs/2,bs*.27f,on);gBtn.push_back({{x,by,bs,bs},id});x+=bs+gp;}
-  float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v16  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
+  float tp=.4f*u;char hb[64];snprintf(hb,64,"%.16s  v17  %d FPS",gProj.c_str(),(int)(gFps+.5f));text(hb,x+1.5f*u,hH/2-2.5f*tp,tp,.6f,.6f,.66f);}
  {float bs=5.8f*u,gp=.45f*u,by=(hH-bs)/2,xr=W-ML_;
   static const int PJ[3]={42,41,40};
   for(int k=0;k<3;k++){int id=PJ[k];bool on=gFlash[id]>0||(id==41&&gImportOpen&&gPick==1);float x=xr-bs;
