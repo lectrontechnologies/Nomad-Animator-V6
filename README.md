@@ -13,3 +13,6 @@ Android 3D Animation Software
 - Shapekeys
 - Better UI (Added)
 - Gizmos (Added)
+- Path Tracing (Added)
+- Image Rendering (Added)
+- Video Rendering 
