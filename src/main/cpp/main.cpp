@@ -131,7 +131,7 @@ precision highp float; in vec3 vN; in vec3 vP; in vec3 vW; in vec2 vUV; uniform 
 vec3 shade(vec3 L,vec3 Lc,vec3 N,vec3 V,vec3 alb,vec3 F0,float met,float rou){
  vec3 H=normalize(L+V);float a=rou*rou,a2=a*a;float NL=max(dot(N,L),0.0),NV=max(dot(N,V),1e-3),NH=max(dot(N,H),0.0),VH=max(dot(V,H),0.0);
  float dd=NH*NH*(a2-1.0)+1.0;float D=a2/(3.14159*dd*dd+1e-6);float k=(rou+1.0)*(rou+1.0)/8.0;
- float G=(NL/(NL*(1.0-k)+k))*(NV/(NV*(1.0-k)+k));vec3 F=F0+(1.0-F0)*pow(1.0-VH,5.0);
+ float G=(NL/(NL*(1.0-k)+k))*(NV/(NV*(1.0-k)+k));vec3 F=F0+(1.0-F0)*pow(max(1.0-VH,0.0),5.0);
  vec3 spec=D*G*F/(4.0*NV*max(NL,1e-3));vec3 kd=(1.0-F)*(1.0-met);
  return (kd*alb/3.14159+spec)*Lc*NL;}
 vec3 pbr(){vec3 N=normalize(vN),V=normalize(uCam-vW);if(dot(N,V)<0.0)N=-N;
@@ -686,9 +686,9 @@ uniform vec3 uCam,uF,uR,uU;uniform vec2 uTH;uniform vec3 uSunD,uSunC;uniform flo
 uint rs;
 uint pcg(uint v){uint s=v*747796405u+2891336453u;uint w=((s>>((s>>28u)+4u))^s)*277803737u;return (w>>22u)^w;}
 float rnd(){rs=pcg(rs);return float(rs)*(1.0/4294967296.0);}
-const float PI=3.14159265;
+const float PI=3.14159265;const float SHTOL=0.012;
 vec3 sky(vec3 d){return mix(vec3(.30,.28,.26),vec3(.42,.52,.78),clamp(d.y*.5+.5,0.,1.))*.9;}
-bool hit(vec3 o,vec3 d,bool any,out float th,out int ti,out vec2 buv){
+bool hit(vec3 o,vec3 d,bool any,float tm,out float th,out int ti,out vec2 buv){
  th=1e30;ti=-1;buv=vec2(0.0);vec3 id=1.0/mix(d,vec3(1e-9),lessThan(abs(d),vec3(1e-9)));
  int st[32];int sp=0;st[sp++]=0;
  while(sp>0){int n=st[--sp];vec4 a=nd[2*n],b=nd[2*n+1];
@@ -699,7 +699,7 @@ bool hit(vec3 o,vec3 d,bool any,out float th,out int ti,out vec2 buv){
   if(cnt>0){for(int i=0;i<cnt;i++){int t=lf+i;vec3 p0=tr[8*t].xyz,p1=tr[8*t+1].xyz,p2=tr[8*t+2].xyz;
     vec3 e1=p1-p0,e2=p2-p0,pv=cross(d,e2);float det=dot(e1,pv);if(abs(det)<1e-12)continue;float inv=1.0/det;
     vec3 tv=o-p0;float u=dot(tv,pv)*inv;if(u<0.0||u>1.0)continue;vec3 qv=cross(tv,e1);float v=dot(d,qv)*inv;if(v<0.0||u+v>1.0)continue;
-    float tt=dot(e2,qv)*inv;if(tt>1e-4&&tt<th){
+    float tt=dot(e2,qv)*inv;if(tt>tm&&tt<th){
      float ya=tr[8*t+7].y;if(fract(ya+0.001)>0.25){int lb=int(floor(ya+0.001));if(lb>=0){float w0=1.0-u-v;vec2 uq=vec2(tr[8*t].w*w0+tr[8*t+1].w*u+tr[8*t+2].w*v,tr[8*t+3].w*w0+tr[8*t+4].w*u+tr[8*t+5].w*v);if(textureLod(uTexA,vec3(uq,float(lb)),0.0).a<0.5)continue;}}
      th=tt;ti=t;buv=vec2(u,v);if(any)return true;}}}
   else{st[sp++]=lf;st[sp++]=n+1;}}
@@ -707,7 +707,7 @@ bool hit(vec3 o,vec3 d,bool any,out float th,out int ti,out vec2 buv){
 vec3 brdf(vec3 L,vec3 N,vec3 V,vec3 alb,float met,float rou,vec3 F0){
  vec3 H=normalize(L+V);float a=rou*rou,a2=a*a;float NL=max(dot(N,L),1e-4),NV=max(dot(N,V),1e-3),NH=max(dot(N,H),0.0),VH=max(dot(V,H),0.0);
  float dd=NH*NH*(a2-1.0)+1.0;float D=a2/(PI*dd*dd+1e-7);float k=(rou+1.0)*(rou+1.0)/8.0;
- float G=(NL/(NL*(1.0-k)+k))*(NV/(NV*(1.0-k)+k));vec3 F=F0+(1.0-F0)*pow(1.0-VH,5.0);
+ float G=(NL/(NL*(1.0-k)+k))*(NV/(NV*(1.0-k)+k));vec3 F=F0+(1.0-F0)*pow(max(1.0-VH,0.0),5.0);
  return (1.0-F)*(1.0-met)*alb/PI+D*G*F/(4.0*NV*NL);}
 void basis(vec3 N,out vec3 T,out vec3 B){T=normalize(cross(N,abs(N.y)<0.99?vec3(0.0,1.0,0.0):vec3(1.0,0.0,0.0)));B=cross(N,T);}
 void main(){
@@ -718,7 +718,7 @@ void main(){
  vec3 Lo=vec3(0.0),T=vec3(1.0);vec3 aN=vec3(0.0);float aD=1e4;vec3 aA=vec3(1.0);
  for(int b=0;b<uBounces;b++){
   float th;int ti;vec2 bu;
-  if(!hit(ro,rd,false,th,ti,bu)){Lo+=T*sky(rd);break;}
+  if(!hit(ro,rd,false,1e-4,th,ti,bu)){Lo+=T*sky(rd);break;}
   vec3 n0=tr[8*ti+3].xyz,n1=tr[8*ti+4].xyz,n2=tr[8*ti+5].xyz;
   vec3 N=normalize(n0*(1.0-bu.x-bu.y)+n1*bu.x+n2*bu.y);
   vec4 m1=tr[8*ti+6],m2=tr[8*ti+7];
@@ -731,12 +731,13 @@ void main(){
   if(ln>=0){vec3 tn=textureLod(uTexA,vec3(tuv,float(ln)),0.0).xyz*2.0-1.0;
    vec3 qa=tr[8*ti].xyz,qb=tr[8*ti+1].xyz,qc=tr[8*ti+2].xyz;vec3 e1=qb-qa,e2=qc-qa;
    vec2 ua=vec2(tr[8*ti].w,tr[8*ti+3].w),ub=vec2(tr[8*ti+1].w,tr[8*ti+4].w),uc=vec2(tr[8*ti+2].w,tr[8*ti+5].w);vec2 d1=ub-ua,d2=uc-ua;float rr=d1.x*d2.y-d2.x*d1.y;
-   if(abs(rr)>1e-12){vec3 Tt=(e1*d2.y-e2*d1.y)/rr,Bt=-(e2*d1.x-e1*d2.x)/rr;Tt=normalize(Tt-N*dot(N,Tt));Bt=normalize(Bt-N*dot(N,Bt)-Tt*dot(Tt,Bt));N=normalize(Tt*tn.x+Bt*tn.y+N*tn.z);}}
+   if(abs(rr)>1e-12){vec3 Tt=(e1*d2.y-e2*d1.y)/rr,Bt=-(e2*d1.x-e1*d2.x)/rr;Tt-=N*dot(N,Tt);float lt=length(Tt);
+   if(lt>1e-6){Tt/=lt;Bt-=N*dot(N,Bt)+Tt*dot(Tt,Bt);float lq=length(Bt);if(lq>1e-6){Bt/=lq;vec3 N2=Tt*tn.x+Bt*tn.y+N*tn.z;float l2=dot(N2,N2);if(l2>1e-6)N=N2*inversesqrt(l2);}}}}
   vec3 F0=mix(vec3(0.04),alb,met);
   vec3 V=-rd;if(dot(N,V)<0.0)N=-N;if(b==0){aN=N;aD=th;aA=alb;}vec3 P=ro+rd*th+N*0.002;
   vec3 TT,BB;basis(uSunD,TT,BB);float cz=1.0-rnd()*(1.0-uSunCos),sz=sqrt(max(1.0-cz*cz,0.0)),ph=2.0*PI*rnd();
   vec3 sd=normalize(TT*(sz*cos(ph))+BB*(sz*sin(ph))+uSunD*cz);float NLs=dot(N,sd);
-  if(NLs>0.0){float t2;int i2;vec2 b2;if(!hit(P,sd,true,t2,i2,b2))Lo+=T*brdf(sd,N,V,alb,met,rou,F0)*uSunC*NLs;}
+  if(NLs>0.0){float t2;int i2;vec2 b2;if(!hit(P,sd,true,SHTOL,t2,i2,b2))Lo+=T*brdf(sd,N,V,alb,met,rou,F0)*uSunC*NLs;}
   float a=rou*rou,a2=a*a,ps=mix(0.5,1.0,met);vec3 Ld;vec3 T0,B0;basis(N,T0,B0);
   if(rnd()<ps){float u1=rnd(),u2=rnd();float ct=sqrt((1.0-u2)/(1.0+(a2-1.0)*u2)),st=sqrt(max(1.0-ct*ct,0.0)),p2=2.0*PI*u1;
    vec3 H=normalize(T0*(st*cos(p2))+B0*(st*sin(p2))+N*ct);Ld=reflect(-V,H);}
@@ -749,6 +750,7 @@ void main(){
   if(b>=2){float q=clamp(max(T.r,max(T.g,T.b)),0.05,0.95);if(rnd()>q)break;T/=q;}
   ro=P;rd=Ld;}
  vec4 prev=uFirst==1?vec4(0.0):texelFetch(uPrev,px,0);
+ if(any(isnan(Lo))||any(isinf(Lo)))Lo=vec3(0.0);
  imageStore(uOut,px,prev+vec4(min(Lo,vec3(20.0)),1.0));
  vec4 av=vec4(aN,aD);vec4 pa=uFirst==1?av:texelFetch(uAovPrev,px,0);
  imageStore(uAovOut,px,vec4(pa.rgb+(av.rgb-pa.rgb)/float(uN),pa.a+(av.a-pa.a)/float(uN)));
