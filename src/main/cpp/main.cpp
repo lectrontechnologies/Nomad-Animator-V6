@@ -784,6 +784,7 @@ struct TriD{V p[3],n[3];float uv[3][2]={};V col;float met=0,rou=.5f;float tb=-1,
 std::vector<TriD> gTD;std::vector<int> gOrd;std::vector<V> gCen;std::vector<BN> gBN;
 bool gMcOK=false,gMcPrev=false,gMcFinal=false,gMcGround=true,gMcHaveCam=false;
 int gMcSpp=64,gMcSamples=0,gMcRow=0,gMcRows=24,gMcW=0,gMcH=0,gMcCur=0,gMcFrame=0;
+bool gVidBusy=false;int gMcFinW=1920,gMcBn=6,gVidQ=1;const char*gVidQN[3]={"Rapido 1024","Medio 1280","Alto 1920"};
 GLuint gMcTex[2]={0,0},gMcProg=0,gMcTm=0,gMcNB=0,gMcTB=0,gMcOutF=0,gMcOutT=0;
 GLuint gMcAov[2]={0,0},gMcAlb[2]={0,0},gMcDnT[2]={0,0},gDnProg=0;bool gMcDn=true,gMcDnOK=false,gDnDirty=false;int gMcDnRes=0;GLint dnSrc,dnAov,dnSz,dnStep,dnI0,dnPhi,mcAovPrev,mcN,dnAlb,dnLast,mcAlbPrev,mcTexA;
 GLint mcSz,mcOff,mcFirst,mcFr,mcBn,mcCam,mcF,mcR,mcU,mcTH,mcSD,mcSC,mcSCos,mcPrv,tmAcc,tmSz;
@@ -858,7 +859,7 @@ double sigCam(){return yaw*3.1+pitch*7.3+cd*11.7+tgt.x+tgt.y*2+tgt.z*3;}
 bool mcShow(){return gMcOK&&(gMcPrev||gMcFinal)&&gMcSamples>0&&gMcTex[0];}
 void mcStep(){
  if(!gMcOK||!(gMcPrev||gMcFinal))return;
- int tw_,th_;if(gMcFinal){float sc=std::min(1.f,1920.f/W);tw_=(int)(W*sc);th_=(int)(H*sc);}else{tw_=std::max(W/2,64);th_=std::max(H/2,64);}
+ int tw_,th_;if(gMcFinal){float sc=std::min(1.f,(float)gMcFinW/W);tw_=(int)(W*sc);th_=(int)(H*sc);}else{tw_=std::max(W/2,64);th_=std::max(H/2,64);}
  if(tw_!=gMcW||th_!=gMcH){mcResize(tw_,th_);gSigS=-1;gMcHaveCam=false;}
  double now=nowSec();V e=camEye();V f=norm(tgt-e),r=norm(cross(f,V{0,1,0})),u=cross(r,f);
  if(gMcFinal){if(!gMcHaveCam){mcBuild();gCE=e;gCF=f;gCR=r;gCU=u;mcReset();gMcHaveCam=true;}e=gCE;f=gCF;r=gCR;u=gCU;}
@@ -866,13 +867,13 @@ void mcStep(){
   if(ss!=gSigS&&now-gMcLast>.15){mcBuild();gSigS=ss;gMcLast=now;rs=true;}
   if(sc2!=gSigC){gSigC=sc2;rs=true;}if(rs)mcReset();}
  int cap=gMcFinal?gMcSpp:128;if(gMcSamples>=cap)return;
- if(gDt>.045f)gMcRows=std::max(8,gMcRows*3/4);else if(gDt<.028f)gMcRows=std::min(gMcH,gMcRows*5/4+1);
+ float hiT=gVidBusy?.2f:.045f,loT=gVidBusy?.12f:.028f;if(gDt>hiT)gMcRows=std::max(8,gMcRows*3/4);else if(gDt<loT)gMcRows=std::min(gMcH,gMcRows*5/4+1);
  int rows=std::min(gMcRows,gMcH-gMcRow);
  glUseProgram(gMcProg);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,gMcNB);glBindBufferBase(GL_SHADER_STORAGE_BUFFER,1,gMcTB);
  glBindImageTexture(0,gMcTex[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
  glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gMcTex[gMcCur]);glUniform1i(mcPrv,0);
  glBindImageTexture(1,gMcAov[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gMcAov[gMcCur]);glUniform1i(mcAovPrev,1);glBindImageTexture(2,gMcAlb[gMcCur^1],0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);glActiveTexture(GL_TEXTURE2);glBindTexture(GL_TEXTURE_2D,gMcAlb[gMcCur]);glUniform1i(mcAlbPrev,2);glActiveTexture(GL_TEXTURE3);glBindTexture(GL_TEXTURE_2D_ARRAY,gTexArr);glUniform1i(mcTexA,3);glActiveTexture(GL_TEXTURE0);glUniform1i(mcN,gMcSamples+1);
- glUniform2i(mcSz,gMcW,gMcH);glUniform1i(mcOff,gMcRow);glUniform1i(mcFirst,gMcSamples==0?1:0);glUniform1i(mcFr,gMcFrame);glUniform1i(mcBn,gMcFinal?6:2);
+ glUniform2i(mcSz,gMcW,gMcH);glUniform1i(mcOff,gMcRow);glUniform1i(mcFirst,gMcSamples==0?1:0);glUniform1i(mcFr,gMcFrame);glUniform1i(mcBn,gMcFinal?gMcBn:2);
  glUniform3f(mcCam,e.x,e.y,e.z);glUniform3f(mcF,f.x,f.y,f.z);glUniform3f(mcR,r.x,r.y,r.z);glUniform3f(mcU,u.x,u.y,u.z);
  float th=tanf(FOV/2);glUniform2f(mcTH,th*(float)gMcW/gMcH,th);
  V sd=norm(V{.4f,.8f,.5f});glUniform3f(mcSD,sd.x,sd.y,sd.z);glUniform3f(mcSC,3.2f,3.0f,2.8f);glUniform1f(mcSCos,.9995f);
@@ -890,7 +891,7 @@ void mcDenoise(){if(!gMcDn||!gDnProg||!gMcTex[0])return;int iters=gMcFinal?4:3;g
  gMcDnRes=(iters-1)&1;gMcDnOK=true;glActiveTexture(GL_TEXTURE0);glUseProgram(gProg);}
 void mcDraw(){glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glUseProgram(gMcTm);glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,(gMcDn&&gMcDnOK)?gMcDnT[gMcDnRes]:gMcTex[gMcCur]);
  glUniform1i(tmAcc,0);glUniform2i(tmSz,gMcW,gMcH);glBindVertexArray(meshes[3].vao);glDrawArrays(GL_TRIANGLES,0,6);glEnable(GL_BLEND);glUseProgram(gProg);}
-void mcFrame(){mcStep();if(gDnDirty){if(gMcDn&&mcShow())mcDenoise();gDnDirty=false;}if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
+void mcFrame(){mcStep();if(gDnDirty){if(gMcDn&&mcShow()&&(!gVidBusy||gMcSamples>=gMcSpp))mcDenoise();gDnDirty=false;}if(!mcShow())return;glViewport(0,0,W,H);mcDraw();}
 static void mcWrite(void*c,void*d,int n){fwrite(d,1,n,(FILE*)c);}
 void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  glBindFramebuffer(GL_FRAMEBUFFER,gMcOutF);glViewport(0,0,gMcW,gMcH);mcDraw();
@@ -900,7 +901,7 @@ void mcSave(){if(!mcShow()){toast("Nada para salvar");return;}
  std::string path;bool fb;FILE*f=openOut("png",path,fb);if(!f){toast("Erro ao salvar");return;}
  stbi_write_png_to_func(mcWrite,f,gMcW,gMcH,4,px.data(),gMcW*4);fclose(f);saved(path,fb);}
 // ---------- render de video (MP4 via MediaCodec; plano B: sequencia de PNG) ----------
-struct Vid{bool on=false,png=false,mxOn=false,fb=false;int f0=1,f1=1,f=1,done=0,total=1,vw=0,vh=0,cf=21,stage=0,fd=-1,trk=-1;float tm0=0;AMediaCodec*cd=nullptr;AMediaMuxer*mx=nullptr;std::string path,dir;};
+struct Vid{bool on=false,png=false,mxOn=false,fb=false;int f0=1,f1=1,f=1,done=0,total=1,vw=0,vh=0,cf=21,stage=0,fd=-1,trk=-1;float tm0=0;int spp0=64,fw0=1920,bn0=6;AMediaCodec*cd=nullptr;AMediaMuxer*mx=nullptr;std::string path,dir;};
 Vid gVid;
 bool vidDrain(bool eos){ // esvazia a saida do codec; true quando chegou o fim do stream
  AMediaCodecBufferInfo info;
@@ -930,14 +931,14 @@ void vidToPng(){ // codec indisponivel: salva uma sequencia de PNG
 void vidFinish(bool ok){
  bool png=gVid.png,fb=gVid.fb;int n=gVid.done;std::string p=gVid.path,dr=gVid.dir;float t0=gVid.tm0;
  vidEncClose(ok&&n>0&&!png);
- gVid.on=false;gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();tm=t0;applyAnim();
+ gVid.on=false;gVidBusy=false;gMcSpp=gVid.spp0;gMcFinW=gVid.fw0;gMcBn=gVid.bn0;gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();tm=t0;applyAnim();
  if(gApp&&gApp->activity)ANativeActivity_setWindowFlags(gApp->activity,0,AWINDOW_FLAG_KEEP_SCREEN_ON);
  if(n<=0){if(!png&&!p.empty())remove(p.c_str());toast("Render de video cancelado");return;}
  const char*nota=fb?"  (ative Acesso a todos os arquivos para salvar em Downloads)":"";
  if(png)toast(fm("Frames PNG salvos (%d): %s%s",n,dr.c_str(),nota));else toast(fm("Video salvo (%d frames): %s%s",n,p.c_str(),nota));}
 void rgbaToYuv(const unsigned char*px,int sw,int sh,uint8_t*d){ // px: RGBA de baixo para cima (glReadPixels)
  int vw=gVid.vw,vh=gVid.vh;uint8_t*yp=d,*up=d+(size_t)vw*vh;
- auto at=[&](int x,int y)->const unsigned char*{int sx=std::min(sw-1,(int)((long)x*sw/vw)),sy=std::min(sh-1,(int)((long)y*sh/vh));return px+((size_t)(sh-1-sy)*sw+sx)*4;};
+ auto at=[&](int x,int y)->const unsigned char*{int sx=sw==vw?x:std::min(sw-1,(int)((long)x*sw/vw)),sy=sh==vh?y:std::min(sh-1,(int)((long)y*sh/vh));return px+((size_t)(sh-1-sy)*sw+sx)*4;};
  for(int y=0;y<vh;y++)for(int x=0;x<vw;x++){const unsigned char*p=at(x,y);yp[(size_t)y*vw+x]=(uint8_t)std::clamp(((47*p[0]+157*p[1]+16*p[2]+128)>>8)+16,16,235);}
  for(int y=0;y<vh/2;y++)for(int x=0;x<vw/2;x++){const unsigned char*p=at(2*x,2*y);const unsigned char*p2=at(2*x+1,2*y+1);
   int r=(p[0]+p2[0])/2,g=(p[1]+p2[1])/2,b=(p[2]+p2[2])/2;
@@ -963,8 +964,10 @@ void vidStart(){
  if(!gMcOK){toast("Render de video precisa de ES 3.1");return;}
  if(!filesGranted()){needFiles();return;}
  gVid=Vid();gVid.f0=std::min(gFS,gFE);gVid.f1=std::max(gFS,gFE);gVid.total=gVid.f1-gVid.f0+1;gVid.f=gVid.f0;gVid.tm0=tm;
- float sc=std::min(1.f,1920.f/W);int sw=(int)(W*sc),sh=(int)(H*sc);
- gVid.vw=sw>=1700?1920:1280;gVid.vh=std::max(16,(int)(gVid.vw*(double)sh/std::max(sw,1)+8)/16*16);
+ static const int PW[3]={1024,1280,1920},PB[3]={3,4,6},PS[3]={8,16,0};
+ gVid.spp0=gMcSpp;gVid.fw0=gMcFinW;gVid.bn0=gMcBn;gMcFinW=PW[gVidQ];gMcBn=PB[gVidQ];if(PS[gVidQ])gMcSpp=PS[gVidQ];gVidBusy=true;
+ float sc=std::min(1.f,(float)gMcFinW/W);int sw=(int)(W*sc),sh=(int)(H*sc);
+ gVid.vw=gMcFinW;gVid.vh=std::max(16,(int)(gVid.vw*(double)sh/std::max(sw,1)+8)/16*16);
  long t=(long)time(nullptr);bool ok=false;
  for(int cf:{21,19}){if(ok)break;
   AMediaFormat*f_=AMediaFormat_new();
@@ -1121,7 +1124,7 @@ void frame(){
    rect(x,y,bs,bs,on?.28f:.33f,on?.45f:.33f,on?.7f:.35f,1,1.1f*u);icon2(id,x+bs/2,y+bs/2,bs*.27f,on);gBtn.push_back({{x,y,bs,bs},id});}
   gBtn.push_back({{tbX,tbY,tbW,th_},299});}
  if(gRenderOpen){ // painel Render (viewport + path tracing), recolhivel
-  float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?11:4;
+  float px=tbX+tbW+1*u,py=hH+1.5f*u,pw2=27*u,rh=4.4f*u,tp2=.38f*u,bw_=pw2-2.4f*u,bh_=rh-.6f*u,y1=py+1.0f*u;int nr=gMcOK?12:4;
   panel(px,py,pw2,rh*nr+1.6f*u,1*u);
   sld(2,px,pw2,y1,rh,tp2,"AO",gAOs);
   pill(px+1.2f*u,y1+rh+.3f*u,bw_,bh_,16,(gSSAO&&gPostOK)?"SSAO: on":"SSAO: off",gSSAO,.3f,.3f,.33f);
@@ -1134,8 +1137,9 @@ void frame(){
    pill(px+1.2f*u,y2+3*rh,bw_,bh_,34,gMcGround?"Chao: on":"Chao: off",gMcGround,.3f,.3f,.33f);
    pill(px+1.2f*u,y2+4*rh,bw_,bh_,35,gMcDn?"Denoise: on":"Denoise: off",gMcDn,.3f,.3f,.33f);
    pill(px+1.2f*u,y2+5*rh,bw_,bh_,32,"Salvar PNG",false,.2f,.38f,.55f);
-  pill(px+1.2f*u,y2+6*rh,bw_,bh_,36,gVid.on?fm("Parar video %d/%d",gVid.done,gVid.total).c_str():fm("Render video %d-%d",std::min(gFS,gFE),std::max(gFS,gFE)).c_str(),gVid.on,.5f,.34f,.12f);
-   char sb[64];if(gVid.on)snprintf(sb,64,"Frame %d  %d/%d  %d/%d spp",gVid.f,gVid.done,gVid.total,gMcSamples,gMcSpp);else snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y2+7*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
+  pill(px+1.2f*u,y2+6*rh,bw_,bh_,37,fm("Video: %s",gVidQN[gVidQ]).c_str(),false,.3f,.3f,.33f);
+  pill(px+1.2f*u,y2+7*rh,bw_,bh_,36,gVid.on?fm("Parar video %d/%d",gVid.done,gVid.total).c_str():fm("Render video %d-%d",std::min(gFS,gFE),std::max(gFS,gFE)).c_str(),gVid.on,.5f,.34f,.12f);
+   char sb[64];if(gVid.on)snprintf(sb,64,"Frame %d  %d/%d  %d/%d spp",gVid.f,gVid.done,gVid.total,gMcSamples,gMcSpp);else snprintf(sb,64,"%d / %d spp  %dx%d",gMcSamples,gMcFinal?gMcSpp:128,gMcW,gMcH);text(sb,px+1.2f*u,y2+8*rh+rh/2-2.5f*tp2,tp2*.9f,.7f,.7f,.75f);}
   gBtn.push_back({{px,py,pw2,rh*nr+1.6f*u},299});}
  // outliner + transform (direita)
  float pw=30*u,rx=W-ML_-pw,ry=navY()+navR()+1.5f*u,rh=4.4f*u,tpx=.38f*u;
@@ -1226,6 +1230,7 @@ void press(int i){
  else if(i==42){if(!filesGranted())needFiles();else saveProject();}
  else if(i==35){gMcDn=!gMcDn;gDnDirty=true;}
  else if(i==36){if(gVid.on)vidFinish(true);else vidStart();}
+ else if(i==37){gVidQ=(gVidQ+1)%3;}
  else if(i==16)gSSAO=!gSSAO;
  else if(i==17)gBones=!gBones;
  else if(i==30){gMcPrev=!gMcPrev;if(gMcPrev)gMcFinal=false;gMcHaveCam=false;gSigS=-1;mcReset();}
