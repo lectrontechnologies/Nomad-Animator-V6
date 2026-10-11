@@ -388,6 +388,7 @@ jobs:
           const V AX[3]={{1,0,0},{0,1,0},{0,0,1}};
           const float AC[3][3]={{.9f,.25f,.25f},{.4f,.8f,.3f},{.3f,.5f,1.f}};
           float gl(){return cd*.2f;}
+          float nearP(){return std::clamp(cd*.05f,.005f,.1f);} // plano proximo diminui ao dar zoom perto
           bool prj(V p,float&x,float&y){const float*m=gVP.m;
            float cx=m[0]*p.x+m[4]*p.y+m[8]*p.z+m[12],cy=m[1]*p.x+m[5]*p.y+m[9]*p.z+m[13],cw=m[3]*p.x+m[7]*p.y+m[11]*p.z+m[15];
            if(cw<.01f)return false;x=(cx/cw*.5f+.5f)*W;y=(1-(cy/cw*.5f+.5f))*H;return true;}
@@ -751,7 +752,7 @@ jobs:
            glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glBindVertexArray(meshes[3].vao);
            glBindFramebuffer(GL_FRAMEBUFFER,gAoFbo);glViewport(0,0,gHW,gHH);glUseProgram(gAoP);
            glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gDT);glUniform1i(uAD,0);
-           float th=tanf(FOV/2);glUniform2f(uATH,th*(float)W/H,th);glUniform2f(uANF,.1f,100.f);glUniform1f(uAR,.55f);glUniform2f(uASZ,(float)W,(float)H);glDrawArrays(GL_TRIANGLES,0,6);
+           float th=tanf(FOV/2);glUniform2f(uATH,th*(float)W/H,th);glUniform2f(uANF,nearP(),100.f);glUniform1f(uAR,.55f);glUniform2f(uASZ,(float)W,(float)H);glDrawArrays(GL_TRIANGLES,0,6);
            glBindFramebuffer(GL_FRAMEBUFFER,0);glViewport(0,0,W,H);glUseProgram(gCoP);
            glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,gCT);glActiveTexture(GL_TEXTURE1);glBindTexture(GL_TEXTURE_2D,gAoT);
            glUniform1i(uCC,0);glUniform1i(uCA,1);glUniform2f(uCT,1.f/gHW,1.f/gHH);glUniform1f(uCS,gAOs);glDrawArrays(GL_TRIANGLES,0,6);
@@ -1175,7 +1176,7 @@ jobs:
            bool post=gSSAO&&gPostOK;glBindFramebuffer(GL_FRAMEBUFFER,post?(gMsOK?gMsFbo:gFbo):0);
            glViewport(0,0,W,H);glClearColor(.24f,.24f,.26f,1);glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
            glEnable(GL_DEPTH_TEST);
-           gVP=mul(persp(FOV,(float)W/H,.1f,100),lookAt(camEye(),tgt,{0,1,0}));{V e_=camEye();glUniform3f(uCamL,e_.x,e_.y,e_.z);}
+           gVP=mul(persp(FOV,(float)W/H,nearP(),100),lookAt(camEye(),tgt,{0,1,0}));{V e_=camEye();glUniform3f(uCamL,e_.x,e_.y,e_.z);}
            draw(meshes[4],gVP,id(),.34f,.34f,.37f,1,0);
            auto ln=[&](V c,V sc,float r,float g,float b){T t;t.p=c;t.s=sc;M m=model(t);draw(meshes[0],mul(gVP,m),m,r,g,b,1,0);};
            ln({0,0,0},{20,.014f,.014f},.85f,.28f,.3f);ln({0,0,0},{.014f,.014f,20},.3f,.5f,.9f);
@@ -1385,7 +1386,7 @@ jobs:
             else if(mode>=20){if(hypotf(x-sx,y-sy)>20)moved=true;tlDrag(mode,x);}
             else if(mode>=6)setSlider(mode-6,x);
             else if(mode==1&&n>=2){float d=hypotf(AMotionEvent_getX(e,1)-x,AMotionEvent_getY(e,1)-y);
-             float mx=(x+AMotionEvent_getX(e,1))/2,my=(y+AMotionEvent_getY(e,1))/2;if(pinch>0&&d>1){cd=std::clamp(cd*pinch/d,2.f,40.f);panCam(mx-lmx,my-lmy);}pinch=d;lmx=mx;lmy=my;moved=true;}
+             float mx=(x+AMotionEvent_getX(e,1))/2,my=(y+AMotionEvent_getY(e,1))/2;if(pinch>0&&d>1){cd=std::clamp(cd*pinch/d,.04f,40.f);panCam(mx-lmx,my-lmy);}pinch=d;lmx=mx;lmy=my;moved=true;}
             else if(mode==1||mode==4||mode==5){
              if(rl){rl=false;lx=x;ly=y;}
              else{float dx=x-lx,dy=y-ly;lx=x;ly=y;if(hypotf(x-sx,y-sy)>20)moved=true;
